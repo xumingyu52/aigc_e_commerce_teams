@@ -1006,8 +1006,21 @@ if __name__ == '__main__':
 '''
 
 def run():
-    server = pywsgi.WSGIServer(('0.0.0.0', 5000), app)
-    server.serve_forever()
+    # 尝试使用 5000 端口，失败则使用 5001
+    ports_to_try = [5000, 5001]
+    
+    for port in ports_to_try:
+        try:
+            server = pywsgi.WSGIServer(('0.0.0.0', port), app)
+            print(f">>> Flask server listening on port {port}")
+            server.serve_forever()
+            return
+        except Exception as e:
+            if port == ports_to_try[-1]:  # 最后一个端口也失败了
+                print(f">>> Error: Could not bind to any port {ports_to_try}: {e}")
+                raise
+            else:
+                print(f">>> Port {port} is in use, trying {ports_to_try[ports_to_try.index(port) + 1]}...")
 
 def start():
     try:
