@@ -1,20 +1,18 @@
 import os
 import sys
 from dotenv import load_dotenv
-
+from flask import redirect, url_for
 # 加载 .env 文件
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 load_dotenv(os.path.join(project_root, '.env'), override=True)
 
-# 获取上一级目录，即项目根目录
-project_root = os.path.dirname(current_dir)
 
 # 将项目根目录添加到 sys.path
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# --- 关键步骤 2: 现在可以安全地导入项目模块了 ---
+# 现在可以安全地导入项目模块了 ---
 
 # 导入配置工具
 from utils import config_util
@@ -22,7 +20,7 @@ from utils import config_util
 # 导入 TTS 相关模块 (使用 try-except 防止因缺少文件导致崩溃)
 
 
-# --- 关键步骤 3: 导入标准库和第三方库 ---
+#  导入标准库和第三方库 ---
 from flask import Flask, request, jsonify, send_from_directory, render_template, redirect, url_for, Response, stream_with_context
 from flask_cors import CORS
 from openai import OpenAI
@@ -58,15 +56,10 @@ import oss2
 import redis
 import random
 
-# 获取项目根目录（从 gui 目录向上一级）
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
 
-# 将项目根目录添加到 Python 路径
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-app = Flask(__name__, static_url_path='/static')
+#初始化Flask并配置一些基本设置
+app = Flask(__name__, static_url_path='/static')  #指定静态文件的URL路径为/static
+app.config['TEMPLATES_AUTO_RELOAD'] = True  # 开启模板自动重载，，下一次请求时就会自动加载最新的模板内容，方便调试
 CORS(app)
 # 视频生成配置
 UPLOAD_FOLDER = 'static/uploads'
@@ -76,7 +69,7 @@ SECRET_KEY = 'xiY39rrbIkWX_quiDoCSQWInNnmw6aIu'
 API_ENDPOINT = 'https://openapi.liblibai.cloud/api/generate/comfyui/app'
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB限制上传文件大小，阻止超大文件上传
 #大小设置
 # 创建上传目录
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -85,16 +78,18 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 def favicon():
     try:
         static_images_dir = os.path.join(app.static_folder, 'images')
-        static_ico = os.path.join(static_images_dir, 'favicon.ico')
-        if os.path.exists(static_ico):
+        static_ico = os.path.join(static_images_dir, 'favicon.ico')  #拼接路径，得到完整的图标路径（例/path/to/project/static/images/favicon.ico）
+        if os.path.exists(static_ico):#先在image目录下找favicon.ico路径
             return send_from_directory(static_images_dir, 'favicon.ico', mimetype='image/x-icon')
         root_dir = os.path.dirname(app.root_path)
         root_ico = os.path.join(root_dir, 'favicon.ico')
-        if os.path.exists(root_ico):
+        if os.path.exists(root_ico):#在根目录下找favicon.ico路径
             return send_from_directory(root_dir, 'favicon.ico', mimetype='image/x-icon')
         return redirect(url_for('static', filename='images/kode-icon.png'))
+    #如果两个位置都没找到，返回默认图标
     except Exception:
         return redirect(url_for('static', filename='images/kode-icon.png'))
+    #如果发生报错，也重定向到默认图标，避免图标加载不出这种情况
 
 
 # chat-------------------------------------------------------------------------------------------
@@ -198,7 +193,7 @@ def dify_chat():
         }), 500
 
 
-from flask import redirect, url_for # 确保在文件顶部导入了这些
+ # 确保在文件顶部导入了这些
 
 # 添加流式响应处理端点
 @app.route('/api/chat-messages/stream', methods=['POST'])
@@ -247,46 +242,6 @@ def dify_chat_stream():
         return jsonify({"status": "error", "message": str(e)}), 500
     
     
-'''
-# write excel---------------------------------------------------------------------------------------
-@app.route('/submit-form-data', methods=['POST'])
-def submit_form_data():
-    data = request.get_json()
-    product_name = data['product_name']
-    product_features = data['product_features']
-    ad_type = data['ad_type']
-    ad_best = data['ad_best']
-
-    # 构造要写入CSV的问题和回答
-    question_features = f"{product_name}的产品特点是什么？"
-    answer_features = f"{product_name}的产品特点有 {product_features}"
-    question_ad = f"{product_name}的广告是什么？"
-    answer_ad = f"{product_name}的广告是 {ad_best}"
-
-    # 创建一个DataFrame
-    df = pd.DataFrame({
-        '问题': [question_features, question_ad],
-        '回答': [answer_features, answer_ad]
-    })
-
-    # 指定CSV文件路径
-    file_path = 'qa.csv'
-
-    # 检查文件是否存在，如果存在，则追加数据；如果不存在，则创建文件
-    try:
-        # 如果文件存在，追加数据
-        if os.path.exists(file_path):
-            # 读取现有文件
-            existing_df = pd.read_csv(file_path)
-            # 追加新数据
-            new_df = pd.concat([existing_df, df], ignore_index=True)
-            # 保存到文件
-            new_df.to_csv(file_path, index=False)
-        else:
-            # 文件不存在，直接写入新数据
-            df.to_csv(file_path, index=False)
-        return jsonify({'status': 'success', 'message': 'Data saved successfully'})
-'''
 
 @app.route('/')
 def index():
@@ -973,19 +928,113 @@ def delete_product_by_id(product_id):  # 修改函数名确保唯一性
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 #小红书文案生成
+def generate_follow_up_questions(content):
+    """
+    调用Dify API基于生成内容生成3个相关追问
+    返回JSON字符串格式的问题列表，如 '["问题1", "问题2", "问题3"]'
+    """
+    try:
+        # 优先使用 WORKFLOW_KEY，因为我们知道它是可用的
+        api_key = os.getenv('DIFY_WORKFLOW_KEY', 'app-LLqziYb1p0ySdDXKTrOa0RQt')
+        
+        # 截断过长的内容以避免token超限
+        content_snippet = content[:2000]
+        
+        prompt = f"""
+Analyze the following e-commerce copy and generate 3 specific follow-up questions to help the merchant refine it.
+The questions MUST be specific to the product mentioned in the content (e.g., if it's mango cake, ask about mango origin or cake texture, not just "product").
+
+**Content:**
+{content_snippet}
+
+**Requirements:**
+1. Ask about the specific target audience for this product.
+2. Ask about a specific selling point mentioned in the text that could be expanded.
+3. Ask about a promotional offer suitable for this item.
+
+**Format:**
+Return ONLY a valid JSON array of strings containing exactly 3 questions.
+Do NOT include any examples or markdown.
+Just the JSON array.
+"""
+        # 使用 Dify Chat API (专门用于生成追问，比 Workflow 更灵活)
+        # Key: app-rMfQSR6zkY4OdNECHtBZP4tN
+        chat_api_key = os.getenv('DIFY_CHAT_KEY', 'app-rMfQSR6zkY4OdNECHtBZP4tN')
+        
+        response = requests.post(
+            'https://api.dify.ai/v1/chat-messages',
+            headers={
+                'Authorization': f'Bearer {chat_api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                "inputs": {},
+                "query": prompt,
+                "response_mode": "blocking",
+                "user": "system-fallback-generator",
+                "conversation_id": ""
+            },
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Chat API 直接返回 answer
+            answer = data.get('answer', '')
+            
+            # 尝试提取JSON数组
+            import re
+            match = re.search(r'\[[\s\S]*?\]', answer)
+            if match:
+                return match.group(0)
+            return None
+        return None
+    except Exception as e:
+        print(f"Error generating follow-up questions: {e}")
+        return None
+
 @app.route('/generate_xiaohongshu', methods=['POST'])
 def handle_xiaohongshu():
     try:
         data = request.get_json(force=True) or {}
+        q = data.get('query', '')
+        
+        # 强制注入追问指令 (后端双重保险)
+        instruction = """
+\n\n【必须执行的任务：生成后续操作建议】
+作为经验丰富的**电商运营专家**，请在生成文案后，向商家提出3个能直接提升转化率的专业建议。
+**风格要求：专业、干练、结果导向。**
+
+**请参考以下维度：**
+1. **精准获客**：
+   - "想要精准转化哪类人群？（学生/宝妈/白领）"
+   - "目标受众的消费能力如何？"
+
+2. **卖点提炼**：
+   - "这款产品的核心转化卖点是？（低价/稀缺/高品质）"
+   - "与竞品相比，最大的优势是什么？"
+
+3. **促销逼单**：
+   - "补充限时优惠信息能提升下单率哦？"
+   - "是否需要强调库存紧张感？"
+
+**格式严格要求**：
+请务必只输出以下JSON格式的字符串在回答的最后，不要包含Markdown代码块，不要有任何其他解释文字：
+<<<Questions:["想要精准转化哪类人群？","核心转化卖点是什么？","补充限时优惠信息？"]>>>
+"""
+        if "必须执行的任务" not in q:
+            q = q + "\n" + instruction
+
+        api_key = os.getenv('DIFY_WORKFLOW_KEY', 'app-LLqziYb1p0ySdDXKTrOa0RQt')
         response = requests.post(
             'https://api.dify.ai/v1/workflows/run',
-            headers={'Authorization': f'Bearer {os.getenv("DIFY_WORKFLOW_KEY")}'},
+            headers={'Authorization': f'Bearer {api_key}'},
             json={
-                'inputs': {'basic_instruction': data.get('query', '')},
+                'inputs': {'basic_instruction': q},
                 'response_mode': 'blocking',
                 'user': 'abc-123'
             },
-            timeout=25
+            timeout=35
         )
         response_data = response.json()
 
@@ -1003,6 +1052,47 @@ def handle_xiaohongshu():
                 if isinstance(v, str):
                     hashtags = v
                     break
+            
+            # 尝试提取追问问题并拼接到内容末尾
+            questions = ''
+            for k in ['questions', 'suggested_questions', 'follow_up']:
+                v = outputs.get(k)
+                if v:
+                    if isinstance(v, list):
+                        questions = json.dumps(v, ensure_ascii=False)
+                    elif isinstance(v, str):
+                        questions = v
+                    break
+            
+            if questions and '<<<Questions:' not in content:
+                content += f"\n\n<<<Questions:{questions}>>>"
+
+        # 强制兜底逻辑（智能判断版）：仅当AI完全未生成追问时触发
+        if '<<<Questions:' not in content:
+            # 尝试调用AI生成动态追问
+            dynamic_qs = generate_follow_up_questions(content)
+            if dynamic_qs:
+                 content += f"\n\n<<<Questions:{dynamic_qs}>>>"
+            else:
+                # 失败时使用简单的静态兜底
+                # 尝试从正文中提取商品名（简单 heuristic）
+                product_guess = "商品"
+                if "这个" in content:
+                    try:
+                        # 尝试提取 "这个xx" 
+                        start = content.find("这个") + 2
+                        end = min(start + 5, len(content))
+                        product_guess = content[start:end].split('，')[0].split('！')[0]
+                    except: pass
+                
+                # 生成稍微动态一点的兜底问题
+                fallback_qs = [
+                    f"生成{product_guess}的视频脚本",
+                    f"强调{product_guess}的性价比",
+                    "换个更有趣的风格"
+                ]
+                content += f"\n\n<<<Questions:{json.dumps(fallback_qs, ensure_ascii=False)}>>>"
+
         if not content:
             data_section = response_data.get('data', {})
             for k in ['text', 'result', 'message']:
@@ -1027,6 +1117,27 @@ def handle_xiaohongshu():
 @app.route('/generate_xiaohongshu_stream', methods=['GET'])
 def handle_xiaohongshu_stream():
     q = request.args.get('query', '')
+    
+    # 强制注入追问指令 (后端双重保险)
+    instruction = """
+\n\n【必须执行的任务：生成后续操作建议】
+作为经验丰富的**电商运营专家**，请在生成文案后，基于当前生成的文案内容和商品特点，生成3个**非常具体、针对性强**的追问，引导商家补充更多细节。
+**严禁使用通用模板（如"这群用户最担心什么"、"具体的穿着/使用场景是"等）**，必须结合具体的商品品类和当前上下文进行提问。
+
+**追问生成原则：**
+1. **紧扣品类**：不要问薯片关于"穿着场景"的问题，也不要问衣服关于"口感"的问题。
+2. **细化痛点**：不要泛泛而问"用户担心什么"，要具体到"是否担心会碎"、"是否担心起球"等。
+3. **场景具体**：不要只问"使用场景"，要问"是追剧吃还是办公室零食"、"是约会穿还是通勤穿"。
+4. **避免重复**：不要提出已经包含在文案中的问题。
+
+**格式严格要求**：
+请务必只输出以下JSON格式的字符串在回答的最后，不要包含Markdown代码块，不要有任何其他解释文字：
+<<<Questions:["针对性追问1","针对性追问2","针对性追问3"]>>>
+"""
+    # 避免重复注入
+    if "必须执行的任务" not in q:
+        q = q + "\n" + instruction
+
     @stream_with_context
     def generate():
         try:
@@ -1038,13 +1149,16 @@ def handle_xiaohongshu_stream():
 
             def worker():
                 try:
+                    api_key = os.getenv('DIFY_WORKFLOW_KEY', 'app-LLqziYb1p0ySdDXKTrOa0RQt')
+                    print(f"Calling Dify API with query length: {len(q)}") # Debug log
                     r = requests.post(
                         'https://api.dify.ai/v1/workflows/run',
-                        headers={'Authorization': f'Bearer {os.getenv("DIFY_WORKFLOW_KEY")}'},
+                        headers={'Authorization': f'Bearer {api_key}'},
                         json={'inputs': {'basic_instruction': q}, 'response_mode': 'blocking', 'user': 'abc-123'},
-                        timeout=25
+                        timeout=35 # Increased timeout
                     )
                     rd = r.json()
+                    # print(f"Dify Response: {rd}") # Debug log
                     outs = rd.get('data', {}).get('outputs', {})
                     content = ''
                     hashtags = ''
@@ -1059,6 +1173,51 @@ def handle_xiaohongshu_stream():
                             if isinstance(v, str):
                                 hashtags = v
                                 break
+                        
+                        # 尝试提取追问问题并拼接到内容末尾
+                        questions = ''
+                        for k in ['questions', 'suggested_questions', 'follow_up']:
+                            v = outs.get(k)
+                            if v:
+                                if isinstance(v, list):
+                                    questions = json.dumps(v, ensure_ascii=False)
+                                elif isinstance(v, str):
+                                    questions = v
+                                break
+                        
+                        if questions and '<<<Questions:' not in content:
+                            # 确保格式符合前端解析要求
+                            if not questions.strip().startswith('['):
+                                # 尝试修复格式
+                                pass 
+                            content += f"\n\n<<<Questions:{questions}>>>"
+
+                    # 强制兜底逻辑（智能判断版）：仅当AI完全未生成追问时触发
+                    if '<<<Questions:' not in content:
+                        # 尝试调用AI生成动态追问
+                        dynamic_qs = generate_follow_up_questions(content)
+                        if dynamic_qs:
+                            content += f"\n\n<<<Questions:{dynamic_qs}>>>"
+                        else:
+                            # 失败时使用简单的静态兜底
+                            # 尝试从正文中提取商品名（简单 heuristic）
+                            product_guess = "商品"
+                            if "这个" in content:
+                                try:
+                                    # 尝试提取 "这个xx" 
+                                    start = content.find("这个") + 2
+                                    end = min(start + 5, len(content))
+                                    product_guess = content[start:end].split('，')[0].split('！')[0]
+                                except: pass
+                            
+                            # 生成稍微动态一点的兜底问题
+                            fallback_qs = [
+                                f"生成{product_guess}的视频脚本",
+                                f"强调{product_guess}的性价比",
+                                "换个更有趣的风格"
+                            ]
+                            content += f"\n\n<<<Questions:{json.dumps(fallback_qs, ensure_ascii=False)}>>>"
+
                     if not content:
                         ds = rd.get('data', {})
                         for k in ['text', 'result', 'message']:
@@ -1085,13 +1244,13 @@ def handle_xiaohongshu_stream():
                     payload = qout.get()
                     content = payload["content"]
                     hashtags = payload["hashtags"]
-                    size = 48
+                    size = 1
                     i = 0
                     while i < len(content):
                         chunk = content[i:i+size]
                         yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                         i += size
-                        time.sleep(0.02)
+                        time.sleep(0.01)
                     yield f"data: {json.dumps({'done': True, 'hashtags': hashtags})}\n\n"
                     break
                 if done["err"] is not None:
@@ -1108,6 +1267,104 @@ def handle_xiaohongshu_stream():
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     return Response(generate(), mimetype='text/event-stream', headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","Connection":"keep-alive"})
+
+@app.route('/generate_xiaohongshu_stream_post', methods=['POST'])
+def handle_xiaohongshu_stream_post():
+    data = request.get_json()
+    q = data.get('query', '')
+    
+    # 移除强制注入的追问指令，避免上下文过长导致AI忽略补充信息
+    # 追问现在由 generate_follow_up_questions 专门处理
+
+    @stream_with_context
+    def generate():
+        try:
+            yield "data: {\"status\":\"init\"}\n\n"
+            
+            # 使用 Dify Workflow API
+            api_key = os.getenv('DIFY_WORKFLOW_KEY', 'app-LLqziYb1p0ySdDXKTrOa0RQt') # Use known key as default
+            if not api_key:
+                # 如果没有 Workflow Key，回退尝试 Chat Key (虽然不太可能兼容)
+                api_key = os.getenv('DIFY_CHAT_KEY', 'app-rMfQSR6zkY4OdNECHtBZP4tN')
+            
+            url = 'https://api.dify.ai/v1/workflows/run'
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            }
+            # Workflow API payload structure
+            # 同时传入 query 和 basic_instruction 以兼容不同的变量名定义
+            payload = {
+                'inputs': {'query': q, 'basic_instruction': q},
+                'response_mode': 'streaming',
+                'user': 'user-123'
+            }
+            
+            print(f"Calling Dify Workflow API with query length: {len(q)}")
+            
+            with requests.post(url, headers=headers, json=payload, stream=True, timeout=60) as response:
+                if response.status_code != 200:
+                    yield f"data: {json.dumps({'error': f'API Error: {response.status_code} - {response.text}'})}\n\n"
+                    return
+
+                full_content = ""
+                hashtags = ""
+                
+                for line in response.iter_lines():
+                    if line:
+                        decoded_line = line.decode('utf-8')
+                        if decoded_line.startswith('data:'):
+                            try:
+                                json_str = decoded_line[5:]
+                                data = json.loads(json_str)
+                                event = data.get('event')
+                                
+                                # Workflow API uses 'text_chunk' for content
+                                if event == 'text_chunk':
+                                    chunk = data.get('data', {}).get('text', '')
+                                    if chunk:
+                                        full_content += chunk
+                                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                                elif event == 'workflow_finished':
+                                    pass
+                                elif event == 'error':
+                                    yield f"data: {json.dumps({'error': data.get('message', 'Unknown error')})}\n\n"
+                            except Exception as e:
+                                print(f"Error parsing chunk: {e}")
+                                continue
+                                
+                # 流式结束后，处理 hashtags 和 追问
+                try:
+                    import re
+                    ht_match = re.search(r'"hashtags"\s*:\s*"([^"]+)"', full_content)
+                    if ht_match:
+                        hashtags = ht_match.group(1)
+                except:
+                    pass
+
+                # 检查是否生成了追问，如果没有，进行兜底
+                if '<<<Questions:' not in full_content:
+                     # 尝试调用AI生成动态追问
+                    dynamic_qs = generate_follow_up_questions(full_content)
+                    if dynamic_qs:
+                        qs_block = f"\n\n<<<Questions:{dynamic_qs}>>>"
+                        full_content += qs_block
+                        yield f"data: {json.dumps({'chunk': qs_block})}\n\n"
+                    else:
+                        # 兜底失败，尝试本地生成简单问题，确保一定有追问
+                        fallback_qs = ["精准转化哪类人群？", "核心卖点还有哪些？", "补充限时优惠信息？"]
+                        qs_block = f"\n\n<<<Questions:{json.dumps(fallback_qs, ensure_ascii=False)}>>>"
+                        full_content += qs_block
+                        yield f"data: {json.dumps({'chunk': qs_block})}\n\n"
+
+                yield f"data: {json.dumps({'done': True, 'hashtags': hashtags})}\n\n"
+
+        except Exception as e:
+            print(f"Stream error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream', headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","Connection":"keep-alive"})
+
 
 @app.route('/api/stream_generate', methods=['POST'])  # 新增专用流式端点
 def stream_generate():
@@ -1906,5 +2163,5 @@ def get_oss_products_by_category():
                 "oss_path": oss_path
             }
         }), 500
-#if __name__ == '__main__':
-   # app.run(host='0.0.0.0',port=5050,debug=True)
+if __name__ == '__main__':
+    run()
