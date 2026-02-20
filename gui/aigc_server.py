@@ -148,6 +148,143 @@ def favicon():
     #如果发生报错，也重定向到默认图标，避免图标加载不出这种情况
 
 
+@app.route('/submit-form-data', methods=['POST'])
+def submit_form_data():
+    try:
+        data = request.get_json()
+        product_name = data.get('product_name')
+        ad_best = data.get('ad_best')
+        copy_type = data.get('copy_type', 'marketing')
+        
+        if not product_name or not ad_best:
+            return jsonify({'status': 'error', 'message': '缺少商品名称或文案内容'}), 400
+            
+        # 初始化OSS客户端
+        auth = oss2.Auth(OSS_CONFIG['ACCESS_KEY_ID'], OSS_CONFIG['ACCESS_KEY_SECRET'])
+        bucket = oss2.Bucket(auth, OSS_CONFIG['ENDPOINT'], OSS_CONFIG['BUCKET_NAME'])
+        
+        # 查找商品ID
+        target_product_id = None
+        prefix = 'products/'
+        
+        # 遍历所有商品查找匹配的名称
+        for obj in oss2.ObjectIterator(bucket, prefix=prefix, delimiter='/'):
+            if obj.is_prefix() and obj.key.count('/') == 2:
+                prod_id = obj.key.split('/')[1]
+                if not prod_id.startswith('prod_'):
+                    continue
+                    
+                info_path = f'{prefix}{prod_id}/info.json'
+                try:
+                    if bucket.object_exists(info_path):
+                        info_content = bucket.get_object(info_path).read()
+                        info = json.loads(info_content)
+                        if info.get('name') == product_name:
+                            target_product_id = prod_id
+                            break
+                except Exception:
+                    continue
+        
+        if not target_product_id:
+             return jsonify({'status': 'error', 'message': '未在商品库中找到该商品，请先在"商品基础信息库"中添加商品'}), 404
+             
+        # 保存营销文案
+        # 这里为了兼容 product_marketing.html，我们统一保存到 marketing.txt
+        # 如果需要区分类型，可以考虑追加或者使用不同文件名，但目前前端只读 marketing.txt
+        text_path = f'products/{target_product_id}/generated_content/marketing.txt'
+        
+        # 如果是追加模式 (可选)
+        # current_content = ""
+        # if bucket.object_exists(text_path):
+        #     current_content = bucket.get_object(text_path).read().decode('utf-8') + "\n\n"
+        # bucket.put_object(text_path, current_content + f"[{copy_type}] {ad_best}")
+        
+        # 目前采用覆盖模式，或者如果用户希望是"最佳方案"，那应该是覆盖
+        bucket.put_object(text_path, ad_best)
+        
+        return jsonify({'status': 'success', 'message': '已成功保存到商品营销素材库'})
+        
+    except Exception as e:
+        print(f"Error saving form data: {e}")
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/delete_marketing_materials', methods=['POST'])
+def delete_marketing_materials():
+    try:
+        data = request.get_json()
+        product_name = data.get('product_name')
+        
+        if not product_name:
+            return jsonify({'status': 'error', 'message': '缺少商品名称'}), 400
+            
+        # 检查OSS配置
+        if not OSS_CONFIG.get('ACCESS_KEY_ID') or not OSS_CONFIG.get('ACCESS_KEY_SECRET'):
+            print("错误: 未配置阿里云OSS密钥")
+            # 这里返回200状态码，但status为error，以便前端能正常处理并显示消息
+            # 或者前端需要修改以处理500错误
+            return jsonify({'status': 'error', 'message': '未配置OSS密钥，无法执行删除操作'}), 200 
+
+        # 连接OSS
+        auth = oss2.Auth(OSS_CONFIG['ACCESS_KEY_ID'], OSS_CONFIG['ACCESS_KEY_SECRET'])
+        bucket = oss2.Bucket(auth, OSS_CONFIG['ENDPOINT'], OSS_CONFIG['BUCKET_NAME'])
+        
+        print(f"开始查找商品: {product_name}")
+        
+        # 1. 查找商品ID
+        # 这里需要遍历 products/ 下的目录，或者如果你有 product_name 到 product_id 的映射
+        # 简单起见，我们遍历 products/prod_* 目录下的 info.json
+        
+        target_product_id = None
+        prefix = 'products/'
+        
+        # 遍历所有商品查找匹配的名称
+        # 注意：这在商品数量很多时效率较低，建议建立索引或数据库
+        for obj in oss2.ObjectIterator(bucket, prefix=prefix, delimiter='/'):
+            if obj.is_prefix() and obj.key.count('/') == 2:
+                prod_id = obj.key.split('/')[1]
+                if not prod_id.startswith('prod_'):
+                    continue
+                    
+                info_path = f'{prefix}{prod_id}/info.json'
+                try:
+                    if bucket.object_exists(info_path):
+                        info_content = bucket.get_object(info_path).read()
+                        info = json.loads(info_content)
+                        if info.get('name') == product_name:
+                            target_product_id = prod_id
+                            break
+                except Exception as e:
+                    print(f"读取 {info_path} 失败: {e}")
+                    continue
+        
+        if not target_product_id:
+            print(f"未找到商品: {product_name}")
+            return jsonify({'status': 'error', 'message': f'未找到商品: {product_name}'}), 200 # 返回200让前端处理逻辑错误
+            
+        print(f"找到商品ID: {target_product_id}，开始删除营销素材...")
+
+        # 2. 删除营销素材
+        # 营销素材通常存储在 products/{id}/marketing/ 目录下
+        marketing_prefix = f'products/{target_product_id}/marketing/'
+        
+        deleted_count = 0
+        for obj in oss2.ObjectIterator(bucket, prefix=marketing_prefix):
+            bucket.delete_object(obj.key)
+            deleted_count += 1
+            
+        print(f"删除完成，共删除 {deleted_count} 个文件")
+        
+        return jsonify({
+            'status': 'success', 
+            'message': f'已删除 {deleted_count} 个营销素材文件',
+            'deleted_count': deleted_count
+        })
+        
+    except Exception as e:
+        print(f"删除营销素材失败: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': str(e)}), 200 # 返回200让前端展示具体错误
+
 # chat-------------------------------------------------------------------------------------------
 def chat(query):
     api_key = os.getenv('DIFY_WORKFLOW_KEY')

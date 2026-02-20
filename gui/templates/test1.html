@@ -1008,6 +1008,24 @@ kimi api
 
     loadBasicSettings();
 
+    // 新增：处理 URL 参数，自动填充商品名称
+    function handleUrlParams() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const productName = urlParams.get('product');
+        if (productName) {
+            const decodedName = decodeURIComponent(productName);
+            document.getElementById('input1').value = decodedName;
+            // 自动切换到产品信息输入标签页
+            const tabLink = document.querySelector('a[href="#home2"]');
+            if (tabLink) {
+                $(tabLink).tab('show');
+            }
+        }
+    }
+    
+    // 页面加载完成后处理 URL 参数
+    document.addEventListener('DOMContentLoaded', handleUrlParams);
+
     function sanitizeText(text) {
         try {
             var s = (text == null ? '' : String(text));
@@ -1536,8 +1554,12 @@ kimi api
         xhr.onload = function () {
             if (xhr.status === 200) {
                 console.log('Data saved successfully');
+                alert('最佳方案已保存到商品营销素材库！');
             } else {
                 console.error('Error saving data');
+                var resp = {};
+                try { resp = JSON.parse(xhr.responseText); } catch(e) {}
+                alert('保存失败: ' + (resp.message || resp.error || '未知错误'));
             }
         };
     });
