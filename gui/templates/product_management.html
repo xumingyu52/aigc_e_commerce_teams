@@ -501,6 +501,10 @@
                             </div>
                         </form>
                     </div>
+                    <!-- 自动保存状态提示 -->
+                    <div id="auto-save-status" style="position: absolute; top: 15px; right: 15px; font-size: 12px; color: #5eead4; display: none;">
+                        <i class="fa fa-check-circle"></i> 已自动保存草稿
+                    </div>
                 </div>
             </div>
 
@@ -545,6 +549,52 @@
 $(document).ready(function() {
     let uploadedImageUrls = [];
     let currentEditProduct = null;
+    const AUTO_SAVE_KEY = 'product_draft';
+
+    // 自动填充草稿 (仅在非编辑模式下加载)
+    function loadDraft() {
+        if (currentEditProduct) return; // 编辑模式不加载草稿
+        
+        const draft = localStorage.getItem(AUTO_SAVE_KEY);
+        if (draft) {
+            try {
+                const data = JSON.parse(draft);
+                if (data.productName) $('#productName').val(data.productName);
+                if (data.productCategory) $('#productCategory').val(data.productCategory);
+                if (data.productPrice) $('#productPrice').val(data.productPrice);
+                if (data.productFeatures) $('#productFeatures').val(data.productFeatures);
+                if (data.productDescription) $('#productDescription').val(data.productDescription);
+                
+                $('#auto-save-status').show().delay(2000).fadeOut();
+            } catch (e) {
+                console.error('Draft load error:', e);
+            }
+        }
+    }
+    
+    // 监听输入自动保存 (仅在非编辑模式下保存)
+    $('#productForm input, #productForm textarea, #productForm select').on('input change', function() {
+        if (currentEditProduct) return; // 编辑模式不保存草稿
+        
+        const data = {
+            productName: $('#productName').val(),
+            productCategory: $('#productCategory').val(),
+            productPrice: $('#productPrice').val(),
+            productFeatures: $('#productFeatures').val(),
+            productDescription: $('#productDescription').val()
+        };
+        localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify(data));
+        $('#auto-save-status').text('已自动保存草稿').show();
+    });
+
+    // 提交成功后清除草稿
+    function clearDraft() {
+        localStorage.removeItem(AUTO_SAVE_KEY);
+        $('#auto-save-status').hide();
+    }
+
+    // 初始化加载草稿
+    loadDraft();
 
     const MAX_FILE_SIZE = 20 * 1024 * 1024;
     const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -653,22 +703,12 @@ $(document).ready(function() {
                 images: uploadedImageUrls
             };
             
-            const response = await fetch('/save_product', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(productData)
-            });
+            const isEdit = !!currentEditProduct;
+            await saveProduct(productData);
             
-            const result = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(result.error || '保存失败');
+            if (!isEdit) {
+                clearDraft(); // 仅新增时清除草稿
             }
-            
-            showAlert('商品信息保存成功！', 'success');
-            loadProducts(); // 刷新商品列表
             
         } catch (error) {
             showAlert(`操作失败: ${error.message}`, 'danger');
@@ -849,7 +889,50 @@ $(document).ready(function() {
         $(this).hide();
     });
 
+    // 新增：处理 URL 参数，实现从其他页面跳转过来自动编辑
+    function handleUrlParams() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const editProductName = urlParams.get('edit_product');
+        
+        if (editProductName) {
+            // 等待列表加载完成
+            const checkInterval = setInterval(() => {
+                const rows = $('#productTable tbody tr');
+                if (rows.length > 0) {
+                    clearInterval(checkInterval);
+                    
+                    // 查找对应商品的行
+                    let targetRow = null;
+                    rows.each(function() {
+                        const name = $(this).find('td:eq(1)').text().trim(); // 假设第二列是名称
+                        if (name === editProductName) {
+                            targetRow = $(this);
+                            return false; // break
+                        }
+                    });
+                    
+                    if (targetRow) {
+                        // 滚动到该行并触发编辑点击
+                        $('html, body').animate({
+                            scrollTop: targetRow.offset().top - 100
+                        }, 500);
+                        targetRow.find('.edit-btn').click();
+                        
+                        // 清除 URL 参数，避免刷新再次触发
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                    } else {
+                        showAlert(`未找到商品: ${editProductName}`, 'warning');
+                    }
+                }
+            }, 500); // 每500ms检查一次
+            
+            // 10秒超时停止检查
+            setTimeout(() => clearInterval(checkInterval), 10000);
+        }
+    }
+
     loadProducts();
+    handleUrlParams(); // 在加载产品后调用参数处理
     $('#resetBtn').click(resetForm);
 
     // 添加拖拽上传功能
