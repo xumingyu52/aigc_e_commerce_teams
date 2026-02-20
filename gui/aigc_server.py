@@ -61,12 +61,68 @@ import random
 app = Flask(__name__, static_url_path='/static')  #指定静态文件的URL路径为/static
 app.config['TEMPLATES_AUTO_RELOAD'] = True  # 开启模板自动重载，，下一次请求时就会自动加载最新的模板内容，方便调试
 CORS(app)
+
+# =============================================================================
+# LiblibAI 平台配置
+# 配置来源：从 .env 环境变量文件读取
+# 配置项说明：
+#   LIBLIB_ACCESS_KEY - LiblibAI 平台的 Access Key
+#   LIBLIB_SECRET_KEY - LiblibAI 平台的 Secret Key
+#   LIBLIB_API_BASE   - LiblibAI API 基础地址
+# 获取方式：请在 https://liblibai.cloud/ 平台注册并获取 API 密钥
+# =============================================================================
+def get_liblib_config():
+    """
+    获取 LiblibAI 平台配置
+    从环境变量读取配置，如果缺失则抛出异常并提示用户
+    """
+    config = {
+        'ACCESS_KEY': os.getenv('LIBLIB_ACCESS_KEY'),
+        'SECRET_KEY': os.getenv('LIBLIB_SECRET_KEY'),
+        'API_BASE': os.getenv('LIBLIB_API_BASE', 'https://openapi.liblibai.cloud')
+    }
+    
+    # 验证必要配置是否存在
+    missing_keys = []
+    if not config['ACCESS_KEY']:
+        missing_keys.append('LIBLIB_ACCESS_KEY')
+    if not config['SECRET_KEY']:
+        missing_keys.append('LIBLIB_SECRET_KEY')
+    
+    if missing_keys:
+        error_msg = f"""
+[错误] LiblibAI 平台配置缺失！
+
+缺少以下环境变量：
+{chr(10).join(['  - ' + key for key in missing_keys])}
+
+请在项目根目录的 .env 文件中添加以下配置：
+LIBLIB_ACCESS_KEY=你的AccessKey
+LIBLIB_SECRET_KEY=你的SecretKey
+LIBLIB_API_BASE=https://openapi.liblibai.cloud
+
+获取方式：
+1. 访问 https://liblibai.cloud/
+2. 登录后进入个人中心
+3. 在 API 管理页面获取密钥
+        """
+        print(error_msg)
+        raise ValueError(error_msg)
+    
+    return config
+
+# 初始化 LiblibAI 配置（启动时验证）
+try:
+    LIBLIB_CONFIG = get_liblib_config()
+    print(f"[LiblibAI] 配置加载成功，API地址: {LIBLIB_CONFIG['API_BASE']}")
+except ValueError as e:
+    LIBLIB_CONFIG = None
+    print(f"[LiblibAI] 配置加载失败: {e}")
+
 # 视频生成配置
 UPLOAD_FOLDER = 'static/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
-ACCESS_KEY = 'k2zYSKKhs0UjVzPaUk4Sng'
-SECRET_KEY = 'xiY39rrbIkWX_quiDoCSQWInNnmw6aIu'
-API_ENDPOINT = 'https://openapi.liblibai.cloud/api/generate/comfyui/app'
+# 注意：视频生成使用的密钥已从环境变量读取，不再使用硬编码
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB限制上传文件大小，阻止超大文件上传
@@ -257,14 +313,21 @@ def handle_generate_video():
     if not image_url:
         return jsonify({'status': 'error', 'error': '缺少图片URL'}), 400
     
+    # 检查 LiblibAI 配置是否已加载
+    if not LIBLIB_CONFIG:
+        return jsonify({
+            'status': 'error', 
+            'error': 'LiblibAI 配置未加载，请检查 .env 文件中的 LIBLIB_ACCESS_KEY 和 LIBLIB_SECRET_KEY 配置'
+        }), 500
+    
     try:
-        # 配置参数 (请替换为您的实际密钥)
-        ak = "k2zYSKKhs0UjVzPaUk4Sng"
-        sk = "xiY39rrbIkWX_quiDoCSQWInNnmw6aIu"
+        # 从环境变量读取 LiblibAI 配置
+        ak = LIBLIB_CONFIG['ACCESS_KEY']
+        sk = LIBLIB_CONFIG['SECRET_KEY']
         template_uuid = "4df2efa0f18d46dc9758803e478eb51c"
-        workflow_uuid = "6ae5fdbd17ca44f3ab02bdba9b55da27"
-        node_id = "47"
-        text_node_id = "55"   # 添加文本节点ID
+        workflow_uuid = "a3d4727d18bb4a7fbde0000d66369602"  # 更新为新的 workflow ID
+        node_id = "67"  # 图片输入节点ID（根据workflow API文档）
+        text_node_id = "137"  # 文本输入节点ID（根据workflow API文档）
 
         # 生成认证信息
         uri = "/api/generate/comfyui/app"
@@ -275,7 +338,7 @@ def handle_generate_video():
         signature = base64.urlsafe_b64encode(digest).rstrip(b'=').decode()
 
         # 构建请求URL
-        url = f"https://openapi.liblibai.cloud{uri}?AccessKey={ak}&Signature={signature}&Timestamp={timestamp}&SignatureNonce={nonce}"
+        url = f"{LIBLIB_CONFIG['API_BASE']}{uri}?AccessKey={ak}&Signature={signature}&Timestamp={timestamp}&SignatureNonce={nonce}"
 
         # 构建请求体
         request_body = {
@@ -288,9 +351,9 @@ def handle_generate_video():
                     }
                 },
                 text_node_id: {  # 添加文本节点
-                    "class_type": "StringConstantMultiline",
+                    "class_type": "JjkText",
                     "inputs": {
-                        "string": text_description
+                        "text": text_description
                     }
                 },
                 "workflowUuid": workflow_uuid
@@ -375,9 +438,8 @@ def run_exe():
 
 # 图生图-------------------------------------------------------------------------------------
 # 图生图配置参数
-IMG2IMG_ACCESS_KEY = 'k2zYSKKhs0UjVzPaUk4Sng'
-IMG2IMG_SECRET_KEY = 'xiY39rrbIkWX_quiDoCSQWInNnmw6aIu'
-IMG2IMG_API_BASE = 'https://openapi.liblibai.cloud'
+# 注意：以下配置已从环境变量读取，使用 LIBLIB_CONFIG 全局配置对象
+# 原硬编码配置已移除：IMG2IMG_ACCESS_KEY, IMG2IMG_SECRET_KEY, IMG2IMG_API_BASE
 # 添加全局任务锁
 task_lock = Lock()
 active_tasks = 0
@@ -385,13 +447,17 @@ MAX_CONCURRENT_TASKS = 3  # 根据API限制调整
 
 def generate_signature(uri, timestamp, nonce):
     """HMAC-SHA1签名生成（与picturetopicture.py完全一致）"""
+    # 检查配置是否已加载
+    if not LIBLIB_CONFIG:
+        raise ValueError('LiblibAI 配置未加载，无法生成签名')
+    
     # 关键点1：uri必须保留开头的斜杠
     uri = uri if uri.startswith('/') else f'/{uri}'
     # 关键点2：拼接顺序必须为 uri&timestamp&nonce
     data = f"{uri}&{timestamp}&{nonce}"
     # 关键点3：使用相同的HMAC-SHA1实现
     digest = hmac.new(
-        IMG2IMG_SECRET_KEY.encode('utf-8'),
+        LIBLIB_CONFIG['SECRET_KEY'].encode('utf-8'),
         data.encode('utf-8'),
         hashlib.sha1
     ).digest()
@@ -400,7 +466,9 @@ def generate_signature(uri, timestamp, nonce):
 
 def build_request_url(uri, signature, timestamp, nonce):
     """构建完整请求URL"""
-    return f"{IMG2IMG_API_BASE}{uri}?AccessKey={IMG2IMG_ACCESS_KEY}&Signature={signature}&Timestamp={timestamp}&SignatureNonce={nonce}"
+    if not LIBLIB_CONFIG:
+        raise ValueError('LiblibAI 配置未加载，无法构建请求URL')
+    return f"{LIBLIB_CONFIG['API_BASE']}{uri}?AccessKey={LIBLIB_CONFIG['ACCESS_KEY']}&Signature={signature}&Timestamp={timestamp}&SignatureNonce={nonce}"
 
 def validate_image_url(url):
     """验证图片URL是否可访问"""
@@ -413,7 +481,7 @@ def validate_image_url(url):
 def check_status(task_id):
     """查询生成任务状态"""
     try:
-        img2img = Img2imgHandler()
+        img2img = get_img2img_handler()
         uri = "/api/generate/comfy/status"
         timestamp = str(int(time.time() * 1000))
         nonce = str(uuid.uuid4())
@@ -460,9 +528,20 @@ def get_status_text(code):
     return status_map.get(code, f"未知状态({code})")
 
 class Img2imgHandler:
+    """
+    图生图处理器
+    使用 LiblibAI 平台 API 进行图像生成
+    配置来源：从 .env 文件的 LIBLIB_CONFIG 读取
+    """
     def __init__(self):
-        self.ak = 'k2zYSKKhs0UjVzPaUk4Sng'
-        self.sk = 'xiY39rrbIkWX_quiDoCSQWInNnmw6aIu'
+        # 从全局配置读取密钥，不再使用硬编码
+        if not LIBLIB_CONFIG:
+            raise ValueError(
+                'LiblibAI 配置未加载，请检查 .env 文件中的 LIBLIB_ACCESS_KEY 和 LIBLIB_SECRET_KEY 配置'
+            )
+        self.ak = LIBLIB_CONFIG['ACCESS_KEY']
+        self.sk = LIBLIB_CONFIG['SECRET_KEY']
+        self.api_base = LIBLIB_CONFIG['API_BASE']
         self.headers = {'Content-Type': 'application/json'}
         self.task_lock = Lock()
         self.active_tasks = 0
@@ -487,7 +566,7 @@ class Img2imgHandler:
         timestamp = str(int(time.time() * 1000))
         nonce = str(uuid.uuid4())
         signature = self.generate_signature(uri, timestamp, nonce)
-        url = f"https://openapi.liblibai.cloud{uri}?AccessKey={self.ak}&Signature={signature}&Timestamp={timestamp}&SignatureNonce={nonce}"
+        url = f"{self.api_base}{uri}?AccessKey={self.ak}&Signature={signature}&Timestamp={timestamp}&SignatureNonce={nonce}"
         return url
 
     def submit_task(self, image_url):
@@ -531,12 +610,31 @@ class Img2imgHandler:
         response.raise_for_status()
         return response.json()
 
-# 初始化处理器
-img2img_handler = Img2imgHandler()
+# 初始化处理器（延迟初始化，避免配置未加载时报错）
+img2img_handler = None
+
+def get_img2img_handler():
+    """获取 Img2imgHandler 实例（延迟初始化）"""
+    global img2img_handler
+    if img2img_handler is None:
+        if not LIBLIB_CONFIG:
+            raise ValueError(
+                'LiblibAI 配置未加载，请检查 .env 文件中的 LIBLIB_ACCESS_KEY 和 LIBLIB_SECRET_KEY 配置'
+            )
+        img2img_handler = Img2imgHandler()
+    return img2img_handler
 
 @app.route('/api/generate_img2img', methods=['POST'])
 def generate_img2img():
     try:
+        # 检查配置是否已加载
+        if not LIBLIB_CONFIG:
+            return jsonify({
+                "code": 1,
+                "msg": "LiblibAI 配置未加载，请检查 .env 文件配置",
+                "data": None
+            }), 500
+        
         data = request.get_json()
         if not data or not data.get('image_url'):
             return jsonify({
@@ -546,7 +644,8 @@ def generate_img2img():
             }), 400
 
         # 提交任务
-        submit_response = img2img_handler.submit_task(data['image_url'])
+        handler = get_img2img_handler()
+        submit_response = handler.submit_task(data['image_url'])
         if submit_response.get("code") != 0:
             return jsonify({
                 "code": 1,
@@ -581,7 +680,8 @@ def check_img2img_status():
                 "data": None
             }), 400
 
-        status_response = img2img_handler.check_status(data['generateUuid'])
+        handler = get_img2img_handler()
+        status_response = handler.check_status(data['generateUuid'])
         if status_response.get("code") != 0:
             return jsonify({
                 "code": 1,
@@ -1385,7 +1485,8 @@ def stream_generate():
  
             task_id = init_response['task_id']
             while True:
-                status = img2img_handler.check_status(task_id)
+                handler = get_img2img_handler()
+                status = handler.check_status(task_id)
                 yield f"data: {json.dumps(status)}\n\n"
                 
                 if status.get('completed'):
@@ -1401,7 +1502,8 @@ def stream_generate():
 # 原有生成函数改为内部调用
 def generate_img2img(image_url):
     try:
-        submit_response = img2img_handler.submit_task(image_url)
+        handler = get_img2img_handler()
+        submit_response = handler.submit_task(image_url)
         if submit_response.get("code") == 0:
             return {'status': 'success', 'task_id': submit_response["data"]["generateUuid"]}
         else:
@@ -2010,7 +2112,17 @@ def save_generated_content():
         bucket = oss2.Bucket(auth, OSS_CONFIG['ENDPOINT'], OSS_CONFIG['BUCKET_NAME'])
         
         # 生成OSS保存路径
-        file_ext = file_url.split('.')[-1].lower()
+        # 修复：正确处理URL，移除查询参数后再提取扩展名
+        from urllib.parse import urlparse
+        parsed_url = urlparse(file_url)
+        path = parsed_url.path  # 获取路径部分，不含查询参数
+        file_ext = path.split('.')[-1].lower() if '.' in path else 'png'  # 默认png格式
+        
+        # 验证扩展名有效性
+        valid_exts = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'mp4', 'avi', 'mov'}
+        if file_ext not in valid_exts:
+            file_ext = 'png' if content_type == 'image' else 'mp4'  # 使用默认扩展名
+        
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         random_str = uuid.uuid4().hex[:6]
         
@@ -2031,11 +2143,17 @@ def save_generated_content():
         
         # 下载文件并上传到OSS
         try:
+            print(f"[OSS上传] 开始下载文件: {file_url}")
             response = requests.get(file_url, stream=True, timeout=30)
             response.raise_for_status()
             
-            # 直接使用流式上传
-            result = bucket.put_object(save_path, response.raw)
+            # 修复：使用 response.content 而不是 response.raw，更稳定
+            file_content = response.content
+            print(f"[OSS上传] 文件下载完成，大小: {len(file_content)} bytes")
+            
+            # 上传到OSS
+            result = bucket.put_object(save_path, file_content)
+            print(f"[OSS上传] OSS返回状态: {result.status}")
             
             if result.status != 200:
                 error_msg = f"OSS上传失败，状态码: {result.status}"
@@ -2044,6 +2162,7 @@ def save_generated_content():
             
             # 返回OSS访问URL
             oss_url = f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/{save_path}"
+            print(f"[OSS上传] 上传成功: {oss_url}")
             
             return jsonify({
                 'status': 'success',
