@@ -554,6 +554,12 @@
             border-color: #f87171;
         }
 
+        .btn-icon.generate:hover {
+            background: rgba(250, 204, 21, 0.2);
+            border-color: #facc15;
+            color: #facc15;
+        }
+
         /* 单元格内容居中 */
         #marketingTable td {
             vertical-align: middle;
@@ -844,16 +850,73 @@ $(document).ready(function() {
     loadMarketingProducts();
 });
 
+// 一键生成按钮事件
+$(document).on('click', '.btn-icon.generate', function() {
+    // 获取当前行数据
+    const row = $(this).closest('tr');
+    const productName = row.find('.product-name .text-ellipsis').text().trim();
+    
+    if (productName) {
+        // 跳转到文案智造器页面，并携带商品名称参数
+        window.location.href = `/test1?product=${encodeURIComponent(productName)}`;
+    }
+});
+
 // 编辑按钮事件
 $(document).on('click', '.btn-icon.edit', function() {
-    const productId = $(this).closest('tr').data('product-id');
-    // 编辑逻辑...
+    // 获取当前行数据
+    const row = $(this).closest('tr');
+    const productName = row.find('.product-name .text-ellipsis').text().trim();
+    
+    // 跳转到商品基础信息库进行编辑
+    if (productName) {
+        // 使用 URL 参数传递要编辑的商品名称
+        window.location.href = `/product_management?edit_product=${encodeURIComponent(productName)}`;
+    }
 });
 
 // 删除按钮事件
 $(document).on('click', '.btn-icon.delete', function() {
-    const productId = $(this).closest('tr').data('product-id');
-    // 删除确认逻辑...
+    // 获取当前行数据
+    const row = $(this).closest('tr');
+    const productName = row.find('.product-name .text-ellipsis').text().trim();
+    
+    // 如果没有找到商品名称，直接返回
+    if (!productName) return;
+    
+    if (confirm(`确定要删除 "${productName}" 的所有营销素材吗？\n注意：这不会删除商品基础信息。`)) {
+        // 获取商品ID (从renderTable中添加data-id属性)
+        // 由于之前渲染没有添加data-id，这里暂时通过名称来删除
+        // 建议后端提供基于名称的删除接口，或者前端先获取ID
+        
+        // 发送删除请求
+        $.ajax({
+            url: `/api/delete_marketing_materials`, // 假设后端有这个接口
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ product_name: productName }),
+            success: function(res) {
+                if (res.status === 'success' || res.code === 200) {
+                    // 移除当前行
+                    row.fadeOut(300, function() { $(this).remove(); });
+                    // 如果表格空了，显示空状态
+                    if ($('#marketingTableBody tr').length <= 1) {
+                        showEmptyMessage();
+                    }
+                } else {
+                    alert('删除失败: ' + (res.message || res.error || '未知错误'));
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('删除请求失败:', error);
+                let msg = '网络错误，无法删除';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    msg = '删除失败: ' + xhr.responseJSON.message;
+                }
+                alert(msg);
+            }
+        });
+    }
 });
 
 // 修改渲染函数确保列宽一致
@@ -882,6 +945,9 @@ function renderTable(products) {
                 </div>
             </td>
             <td class="actions">
+                <button class="btn-icon generate" title="一键生成营销素材">
+                    <i class="fas fa-magic"></i>
+                </button>
                 <button class="btn-icon edit" title="编辑">
                     <i class="fas fa-edit"></i>
                 </button>

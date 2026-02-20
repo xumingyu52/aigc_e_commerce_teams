@@ -148,6 +148,19 @@
                     </div>
                 </div>
 
+                <div class="panel panel-border-animated" id="history-panel">
+                    <div class="panel-title">
+                        <i class="fa fa-history"></i> 历史生成记录
+                        <button class="btn btn-xs btn-danger pull-right" onclick="clearHistory()">清空</button>
+                    </div>
+                    <div class="panel-body">
+                        <div id="history-list" class="row" style="max-height: 300px; overflow-y: auto;">
+                            <!-- 历史记录将通过JS动态插入 -->
+                            <div class="col-xs-12 text-center text-muted">暂无历史记录</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="panel panel-border-animated" id="progress-panel" style="display:none;">
                     <div class="panel-title"><i class="fa fa-spinner fa-spin"></i> 生成进度</div>
                     <div class="panel-body">
@@ -196,6 +209,9 @@ $(document).ready(function() {
     });
 
     $('#product-select').change(updateImagePreview);
+    
+    // 加载历史记录
+    loadHistory();
 
     // 核心生成逻辑
     $('#image-gen-form').submit(async function(e) {
@@ -270,6 +286,10 @@ $(document).ready(function() {
                             status: 'success',
                             image_url: imgData.imageUrl // 这里传原始URL给后端，显示用finalUrl
                         });
+                        
+                        // 保存到历史记录
+                        saveToHistory(imgData.imageUrl);
+                        
                         alert('图片生成成功！');
                     } else {
                         throw new Error('未返回有效图片数据');
@@ -416,6 +436,50 @@ function uploadToOSS(url) {
             }
         }
     });
+}
+
+// 历史记录功能
+function loadHistory() {
+    const history = JSON.parse(localStorage.getItem('gen_img_history') || '[]');
+    const container = $('#history-list');
+    container.empty();
+    
+    if (history.length === 0) {
+        container.html('<div class="col-xs-12 text-center text-muted" style="padding: 20px;">暂无历史记录</div>');
+        return;
+    }
+    
+    history.reverse().forEach(url => {
+        const item = `
+            <div class="col-xs-4 col-md-3" style="margin-bottom: 10px; padding: 0 5px;">
+                <div class="thumbnail" style="margin-bottom: 0; padding: 2px; border: 1px solid #444; background: rgba(0,0,0,0.3);">
+                    <img src="${url}" style="width: 100%; height: 80px; object-fit: cover; cursor: pointer;" 
+                         onclick="$('#generated-image').attr('src', '${url}'); handleImageGenerationSuccess({status:'success', image_url:'${url}'})"
+                         title="点击预览/操作">
+                </div>
+            </div>
+        `;
+        container.append(item);
+    });
+}
+
+function saveToHistory(url) {
+    let history = JSON.parse(localStorage.getItem('gen_img_history') || '[]');
+    // 去重
+    if (!history.includes(url)) {
+        history.push(url);
+        // 最多保存20条
+        if (history.length > 20) history.shift();
+        localStorage.setItem('gen_img_history', JSON.stringify(history));
+        loadHistory();
+    }
+}
+
+function clearHistory() {
+    if(confirm('确定要清空所有历史记录吗？')) {
+        localStorage.removeItem('gen_img_history');
+        loadHistory();
+    }
 }
 </script>
 
