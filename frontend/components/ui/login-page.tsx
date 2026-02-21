@@ -25,7 +25,8 @@ export default function LoginPage() {
       // 简单本地验证
       if (email === 'zxhy' && password === '12345678') {
         // 调用Flask后端API
-        const response = await fetch('http://localhost:5050/api/login', {
+        // 使用相对路径 /api/login，Next.js 会根据 rewrites 代理到 http://localhost:5000/api/login
+        const response = await fetch('/api/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -35,7 +36,7 @@ export default function LoginPage() {
 
         if (response.ok) {
           // 登录成功后跳转到主页
-          window.location.href = 'http://localhost:5050/home'
+          window.location.href = 'http://localhost:5000/home'
         }
       } else {
         alert('账号或密码错误')
