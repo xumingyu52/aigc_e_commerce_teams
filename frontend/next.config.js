@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    // output: 'export', // 注释掉静态导出
     reactStrictMode: true,
-    // 配置API代理
+    // 恢复 rewrites 代理，让 Next.js 自动转发 API 请求到 Flask (5000)
     async rewrites() {
         return [
             {

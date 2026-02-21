@@ -777,9 +777,7 @@ def test3():
 #   return render_template('test4.html')
 
 
-@app.route('/charts')  # 直播数据统计/售卖情况表格/....
-def charts():
-    return render_template('charts.html')
+
 
 
 @app.route('/calendar')  # 日程安排
