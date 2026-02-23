@@ -12,7 +12,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import asyncio
 import aiohttp
-from platforms import PLATFORM_CONFIG, COST_CONFIG
+from gui.platforms import PLATFORM_CONFIG, COST_CONFIG
 import redis
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 

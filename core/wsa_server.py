@@ -266,6 +266,9 @@ class TestServer(MyServer):
 
 __instance: MyServer = None
 __web_instance: MyServer = None
+# 记录已启动的端口转发，避免重复启动导致端口占用
+_PORT_FORWARDERS = set()
+_WS_BOOTSTRAPPED = False
 
 
 def new_instance(host='0.0.0.0', port=10002) -> MyServer:
@@ -291,6 +294,9 @@ def get_web_instance() -> MyServer:
 
 
 def start_port_forwarder(listen_port, target_port, host='0.0.0.0', target_host='127.0.0.1'):
+    key = (host, listen_port, target_host, target_port)
+    if key in _PORT_FORWARDERS:
+        return
     def forward(source, destination):
         string = ' '
         while string:
@@ -324,6 +330,39 @@ def start_port_forwarder(listen_port, target_port, host='0.0.0.0', target_host='
             util.log(1, f"Port forwarding failed to start: {e}")
 
     MyThread(target=serve, args=(listen_port, target_port)).start()
+    _PORT_FORWARDERS.add(key)
+
+
+def ensure_bootstrap() -> bool:
+    global _WS_BOOTSTRAPPED
+    started_any = False
+    try:
+        ui = get_web_instance()
+        if ui is None or not ui.is_running():
+            ui = new_web_instance(port=10003)
+            if not ui.is_running():
+                ui.start_server()
+                started_any = True
+    except Exception:
+        pass
+    try:
+        human = get_instance()
+        if human is None or not human.is_running():
+            human = new_instance(port=10004)
+            if not human.is_running():
+                human.start_server()
+                started_any = True
+    except Exception:
+        pass
+    try:
+        key = ('0.0.0.0', 10000, '127.0.0.1', 10004)
+        if key not in _PORT_FORWARDERS:
+            start_port_forwarder(listen_port=10000, target_port=10004)
+    except Exception:
+        pass
+    if started_any and not _WS_BOOTSTRAPPED:
+        _WS_BOOTSTRAPPED = True
+    return started_any
 
 if __name__ == '__main__':
     testServer = TestServer(host='0.0.0.0', port=10000)

@@ -1,5 +1,6 @@
 import signal
 import atexit
+import subprocess
 import numpy as np
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, make_response, \
@@ -15,9 +16,21 @@ import requests
 import logging
 import io
 from flask import redirect, url_for
+
+# Ensure project root is in sys.path
+import sys
+import os
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from core.task_db import Task_Db
 from gui.api import save_token
-from platforms import PLATFORM_CONFIG, COST_CONFIG
+from gui.platforms import PLATFORM_CONFIG, COST_CONFIG
 import threading
+from scheduler.thread_manager import MyThread
+from gevent import pywsgi
 from collections import defaultdict
 import zlib
 # 添加增量更新相关的导入和全局变量
@@ -43,6 +56,18 @@ def init_incremental_db():
 init_incremental_db()
 
 
+
+
+
+app = Flask(__name__, static_url_path='/static')
+app.secret_key = '8888'  # 设置密钥
+CORS(app) # Enable CORS for all routes
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+from utils import config_util
+
+
 # 预计算存储
 precomputed_data = defaultdict(dict)
 
@@ -51,8 +76,9 @@ exit_flag = threading.Event()
 
 # 添加全局变量
 TRACKED_PAGES = [
-    '/dashboard',
-    '/dashboard_internal',
+    '/dashboard',  #用户数据看板
+    '/dashboard_internal',  #程序员数据看板
+    '/sign_up',  # 商家来源统计
     '/product_management',  # 商品管理页面
     '/product_marketing',  # 商品营销页面
     '/note',  # 营销笔记页面
@@ -177,10 +203,6 @@ def handle_shutdown_signal(signum, frame):
 signal.signal(signal.SIGINT, handle_shutdown_signal)
 signal.signal(signal.SIGTERM, handle_shutdown_signal)
 
-# 启动预计算线程
-precompute_thread = threading.Thread(target=precompute_dashboard_data, daemon=True)
-precompute_thread.start()
-
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -197,10 +219,40 @@ else:
         'year': {'revenue': 0, 'profit': 0, 'merchants': 0, 'active_rate': 0}
     }
 
-app = Flask(__name__)
-app.secret_key = '8888'  # 设置密钥
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+
+
+from utils import config_util
+
+@app.route('/home')
+def home_redirect():
+    # Redirect to the main AIGC server on port 5000
+    return redirect("http://localhost:5000/home")
+
+@app.route('/setting')
+def setting():
+    config_util.load_config()
+    return render_template('setting.html', config=config_util.config)
+
+
+@app.route('/run_exe', methods=['POST'])
+def run_exe():
+    data = request.get_json()
+    exe_path = data.get('exe_path')
+
+    if not exe_path:
+        return jsonify({'error': 'No executable path provided'}), 400
+
+    try:
+        if not os.path.exists(exe_path):
+             return jsonify({'error': f'Executable not found at {exe_path}'}), 404
+
+        # Use subprocess.Popen to run the executable without blocking
+        exe_dir = os.path.dirname(exe_path)
+        subprocess.Popen(exe_path, cwd=exe_dir)
+        return jsonify({'status': 'success', 'message': 'Executable started'})
+    except Exception as e:
+        logger.error(f"Failed to run executable: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 # 改为在app初始化后启动
@@ -209,6 +261,9 @@ def init_precompute_thread():
     local_precompute_thread = threading.Thread(target=precompute_dashboard_data, daemon=True)
     local_precompute_thread.start()
 
+def is_precompute_enabled():
+    v = os.getenv('DASHBOARD_PRECOMPUTE', '1')
+    return v.strip().lower() not in ('0', 'false', 'no', 'off')
 
 # 在全局变量区域添加
 history_data_lock = threading.Lock()
@@ -605,8 +660,7 @@ def convert_numpy_types(obj):
 
 @app.route('/')
 def index():
-    global merchant_df
-    return render_template('index_main.html')
+    return redirect(url_for('dashboard'))
 
 
 # 功能面板
@@ -615,8 +669,45 @@ def dashboard():
     return render_template('dashboard.html')
 
 
+@app.route('/api/dashboard/generated_content', methods=['GET'])
+def get_dashboard_generated_content():
+    try:
+        tasks = Task_Db().get_recent_success_tasks(limit=8)
+        processed_tasks = []
+        for task in tasks:
+            try:
+                result = json.loads(task['result']) if task['result'] else {}
+                item = {
+                    'id': task['id'],
+                    'type': task['type'],
+                    'created_at': task['created_at'],
+                    'preview_url': '',
+                    'url': ''
+                }
+                
+                if 'image' in task['type']:
+                    item['preview_url'] = result.get('image_url')
+                    item['url'] = result.get('image_url')
+                    item['icon'] = 'fa-image'
+                elif 'video' in task['type']:
+                    item['preview_url'] = result.get('cover_url')
+                    item['url'] = result.get('video_url')
+                    item['icon'] = 'fa-video-camera'
+                
+                if item['preview_url']:
+                    processed_tasks.append(item)
+            except Exception as e:
+                app.logger.error(f"Error processing task for dashboard: {e}")
+                
+        return jsonify({'status': 'success', 'tasks': processed_tasks})
+    except Exception as e:
+        app.logger.error(f"Error getting dashboard generated content: {e}")
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
 # 注册路由
 @app.route('/sign_up', methods=['GET', 'POST'])
+@app.route('/sign_up.html', methods=['GET', 'POST'])
 def merchant_signup():
     global merchant_df, merchant_df_lock
     # 处理GET请求 - 显示注册表单
@@ -1166,12 +1257,27 @@ def get_dashboard_data():
 def dashboard_internal():
     return render_template('dashboard_internal.html')
 
+# 兼容带.html后缀的访问
+@app.route('/dashboard.html')
+def dashboard_html():
+    return render_template('dashboard.html')
 
+@app.route('/dashboard_internal.html')
+def dashboard_internal_html():
+    return render_template('dashboard_internal.html')
 
+def run():
+    if is_precompute_enabled():
+        init_precompute_system()
+        init_precompute_thread()
+    server = pywsgi.WSGIServer(('0.0.0.0', 5001), app)
+    server.serve_forever()
 
-# 文案智造器
+def start():
+    MyThread(target=run).start()
 
 if __name__ == '__main__':
-    init_precompute_system()
-    init_precompute_thread()  # 确保app已定义
-    app.run(debug=True, port=5001)
+    if is_precompute_enabled():
+        init_precompute_system()
+        init_precompute_thread()
+    app.run(host='0.0.0.0', port=5001, debug=True)

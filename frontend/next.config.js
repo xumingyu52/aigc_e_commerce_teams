@@ -6,8 +6,16 @@ const nextConfig = {
     async rewrites() {
         return [
             {
+                source: '/login',
+                destination: '/'
+            },
+            {
+                source: '/api/login',
+                destination: 'http://localhost:3002/api/login' // Login server
+            },
+            {
                 source: '/api/:path*',
-                destination: 'http://localhost:5000/api/:path*' // Flask后端地址
+                destination: 'http://localhost:5000/api/:path*' // Flask backend
             }
         ]
     }

@@ -9,7 +9,7 @@
   <title>登录</title>
 
   <!-- ========== Css Files ========== -->
-  <link href="static/css/root.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/root.css') }}" rel="stylesheet">
   <style type="text/css">
     body{background: #F5F5F5;}
   </style>
@@ -17,9 +17,9 @@
   <body>
 
     <div class="login-form">
-      <form action="home" onsubmit="return validateLogin()">
+      <form id="loginForm">
         <div class="top">
-          <img src="../static/images/zxhy.jpg" alt="icon" class="icon">
+          <img src="{{ url_for('static', filename='images/zxhy.jpg') }}" alt="icon" class="icon">
           <h1>智创电商营销系统</h1>
           <h4>智行合一团队</h4>
         </div>
@@ -37,27 +37,65 @@
             <label for="checkbox101"> Remember Me</label>
           </div>
           <button type="submit" class="btn btn-default btn-block">LOGIN</button>
+          <div id="login-status" style="margin-top: 10px; text-align: center; color: red;"></div>
         </div>
       </form>
     </div>
 
-</body>z
-<script>
-  function validateLogin() {
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    
-    if(username !== 'zxhy') {
-      alert('该用户不存在');
-      return false;
-    }
-    
-    if(password !== '12345678') {
-      alert('密码错误');
-      return false;
-    }
-    
-    return true;
-  }
-</script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const loginForm = document.getElementById('loginForm');
+      const statusDiv = document.getElementById('login-status');
+      
+      if (loginForm) {
+        loginForm.addEventListener('submit', async function(event) {
+          event.preventDefault();
+          statusDiv.textContent = 'Logging in...';
+          statusDiv.style.color = '#666';
+          
+          const usernameInput = document.getElementById('username');
+          const passwordInput = document.getElementById('password');
+          
+          if (!usernameInput || !passwordInput) {
+            statusDiv.textContent = 'Error: Inputs not found';
+            return;
+          }
+          
+          const username = usernameInput.value;
+          const password = passwordInput.value;
+          
+          try {
+            const response = await fetch('/api/login', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                email: username,
+                password: password
+              })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok && data.status === 'success') {
+              statusDiv.textContent = 'Success! Redirecting...';
+              statusDiv.style.color = 'green';
+              // Redirect to the main app on port 5000, preserving the current hostname (localhost or IP)
+              const targetHost = window.location.hostname;
+              window.location.href = `http://${targetHost}:5000/home`;
+            } else {
+              statusDiv.textContent = data.message || 'Login failed';
+              statusDiv.style.color = 'red';
+            }
+          } catch (error) {
+            console.error('Login error:', error);
+            statusDiv.textContent = 'Network Error: ' + error.message;
+            statusDiv.style.color = 'red';
+          }
+        });
+      }
+    });
+  </script>
+</body>
 </html>
