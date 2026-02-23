@@ -723,7 +723,7 @@
         <!-- START TOP -->
 <div id="top" class="clearfix">
     <div class="applogo">
-        <a href="{{ url_for('home') }}" class="logo">
+        <a href="http://localhost:5000/home" class="logo">
             <span class="logo-text">智创电商营销系统</span>
             <span class="logo-glow"></span>
         </a>
@@ -752,23 +752,30 @@
 <!-- 侧边栏 -->
 <div class="sidebar clearfix">
     <ul class="sidebar-panel nav">
-        <li><a href="{{ url_for('home') }}"><span class="icon color5"><i class="fa fa-home"></i></span>首页</a></li>
+        <li><a href="http://localhost:5000/home"><span class="icon color5"><i class="fa fa-home"></i></span>首页</a></li>
 
         <li><a href="#"><span class="icon color10"><i class="fa fa-th"></i></span>商品信息管理<span class="caret"></span></a>
             <ul>
-                <li><a href="{{ url_for('product_management') }}">商品基础信息库</a></li>
-                <li><a href="{{ url_for('product_marketing') }}">商品营销素材库</a></li>
+                <li><a href="http://localhost:5000/product_management">商品基础信息库</a></li>
+                <li><a href="http://localhost:5000/product_marketing">商品营销素材库</a></li>
             </ul>
         </li>
 
-        <li><a href="{{ url_for('test1') }}" class="active"><span class="icon color5"><i class="fa fa-comment-o"></i></span>文案智造器</a></li>
+        <li><a href="http://localhost:5000/test1" class="active"><span class="icon color5"><i class="fa fa-comment-o"></i></span>文案智造器</a></li>
 
-        <li><a href="{{ url_for('test2') }}"><span class="icon color11"><i class="fa fa-photo"></i></span>营销图创作</a></li>
-        <li><a href="{{ url_for('test3') }}"><span class="icon color8"><i class="fa fa-film"></i></span>短视频智造</a></li>
-        <li><a href="{{ url_for('setting') }}"><span class="icon color12"><i class="fa fa-smile-o"></i></span>数字直播大厅</a></li>
-        <li><a href="{{ url_for('calendar') }}"><span class="icon color8"><i class="fa fa-calendar-o"></i></span>营销日程规划<span class="label label-danger">NEW</span></a></li>
-        <li><a href="{{ url_for('note') }}"><span class="icon color8"><i class="fa fa-bullhorn"></i></span>营销笔记发布</a></li>
-        <li><a href="/"><span class="icon color5"><i class="fa fa-desktop"></i></span>登录</a></li>
+        <li><a href="http://localhost:5000/test2"><span class="icon color11"><i class="fa fa-photo"></i></span>营销图创作</a></li>
+        <li><a href="http://localhost:5000/test3"><span class="icon color8"><i class="fa fa-film"></i></span>短视频智造</a></li>
+        <li><a href="http://localhost:5000/setting"><span class="icon color12"><i class="fa fa-smile-o"></i></span>数字直播大厅</a></li>
+        <li><a href="http://localhost:5000/calendar"><span class="icon color8"><i class="fa fa-calendar-o"></i></span>营销日程规划<span class="label label-danger">NEW</span></a></li>
+        <li><a href="http://localhost:5000/note"><span class="icon color8"><i class="fa fa-bullhorn"></i></span>营销笔记发布</a></li>
+        <li><a href="#"><span class="icon color8"><i class="fa fa-mortar-board"></i></span>数据统计<span class="caret"></span></a>
+            <ul>
+                <li><a href="http://localhost:5001/sign_up.html">商家来源统计</a></li>
+                <li><a href="http://localhost:5001/dashboard_internal.html">程序员数据看板</a></li>
+                <li><a href="http://localhost:5001/dashboard.html">用户数据看板</a></li>
+            </ul>
+        </li>
+        <li><a href="http://localhost:3000/login"><span class="icon color5"><i class="fa fa-desktop"></i></span>登录</a></li>
     </ul>
 </div>
 
@@ -778,7 +785,7 @@
     <div class="page-header">
         <h1 class="title">文案智造器</h1>
         <ol class="breadcrumb">
-            <li><a href="/">首页</a></li>
+            <li><a href="http://localhost:5000/home">首页</a></li>
             <li class="active">文案智造器</li>
         </ol>
     </div>
@@ -1007,24 +1014,6 @@ kimi api
     }
 
     loadBasicSettings();
-
-    // 新增：处理 URL 参数，自动填充商品名称
-    function handleUrlParams() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const productName = urlParams.get('product');
-        if (productName) {
-            const decodedName = decodeURIComponent(productName);
-            document.getElementById('input1').value = decodedName;
-            // 自动切换到产品信息输入标签页
-            const tabLink = document.querySelector('a[href="#home2"]');
-            if (tabLink) {
-                $(tabLink).tab('show');
-            }
-        }
-    }
-    
-    // 页面加载完成后处理 URL 参数
-    document.addEventListener('DOMContentLoaded', handleUrlParams);
 
     function sanitizeText(text) {
         try {

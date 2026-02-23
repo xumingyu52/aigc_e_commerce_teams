@@ -2,6 +2,19 @@ import os
 import sys
 from dotenv import load_dotenv
 from flask import redirect, url_for
+import signal
+import atexit
+import numpy as np
+import pandas as pd
+from datetime import datetime, timedelta
+import threading
+import sqlite3
+from flask_caching import Cache
+import zlib
+import io
+from collections import defaultdict
+import logging
+
 # 加载 .env 文件
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
@@ -21,7 +34,7 @@ from utils import config_util
 
 
 #  导入标准库和第三方库 ---
-from flask import Flask, request, jsonify, send_from_directory, render_template, redirect, url_for, Response, stream_with_context
+from flask import Flask, request, jsonify, send_from_directory, render_template, redirect, url_for, Response, stream_with_context, session, make_response, after_this_request
 from flask_cors import CORS
 from openai import OpenAI
 from gevent import pywsgi
@@ -31,6 +44,7 @@ from tts import volcano_tts
 from scheduler.thread_manager import MyThread
 from core import wsa_server
 from core.interact import Interact
+from core.task_db import Task_Db
 import fay_booter
 import pandas as pd
 import subprocess
@@ -40,6 +54,7 @@ from pathlib import PurePosixPath, Path
 import requests
 from dashscope import ImageSynthesis
 import dashscope
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 import hmac
 from hashlib import sha1
@@ -50,18 +65,39 @@ import hashlib
 import urllib.parse
 import json
 import traceback
-from threading import Lock
+from threading import Lock, Thread
 from datetime import datetime
 import oss2
 import redis
 import random
-
+from gui.platforms import PLATFORM_CONFIG, COST_CONFIG
 
 #初始化Flask并配置一些基本设置
 app = Flask(__name__, static_url_path='/static')  #指定静态文件的URL路径为/static
+app.secret_key = '8888'  # 设置密钥
 app.config['TEMPLATES_AUTO_RELOAD'] = True  # 开启模板自动重载，，下一次请求时就会自动加载最新的模板内容，方便调试
+app.debug = True
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # pass through HTTP errors
+    if isinstance(e, HTTPException):
+        return e
+    # now you're handling non-HTTP exceptions only
+    print(traceback.format_exc())
+    return render_template("500.html", e=e), 500
+
 CORS(app)
 
+# 配置缓存
+cache_config = {
+    'CACHE_TYPE': 'redis',  # 使用Redis作为缓存后端
+    'CACHE_REDIS_URL': 'redis://localhost:6379/0',
+    'CACHE_DEFAULT_TIMEOUT': 300,  # 默认5分钟
+    'CACHE_KEY_PREFIX': 'dashboard_'
+}
+cache = Cache(config=cache_config)
+cache.init_app(app)
 # =============================================================================
 # LiblibAI 平台配置
 # 配置来源：从 .env 环境变量文件读取
@@ -130,6 +166,32 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB限制上传文件大
 # 创建上传目录
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# ----------------- Dashboard Redirects -----------------
+
+@app.route('/home')
+def home():
+    return render_template('index_main.html')
+
+@app.route('/dashboard')
+def dashboard_redirect():
+    return redirect("http://localhost:5001/dashboard")
+
+@app.route('/dashboard.html')
+def dashboard_html_redirect():
+    return redirect("http://localhost:5001/dashboard.html")
+
+@app.route('/dashboard_internal')
+def dashboard_internal_redirect():
+    return redirect("http://localhost:5001/dashboard_internal")
+
+@app.route('/dashboard_internal.html')
+def dashboard_internal_html_redirect():
+    return redirect("http://localhost:5001/dashboard_internal.html")
+
+# ----------------- Dashboard Logic End -----------------
+
+
+
 @app.route('/favicon.ico')
 def favicon():
     try:
@@ -146,6 +208,107 @@ def favicon():
     except Exception:
         return redirect(url_for('static', filename='images/kode-icon.png'))
     #如果发生报错，也重定向到默认图标，避免图标加载不出这种情况
+
+
+
+
+@app.route('/customer_analysis')
+def customer_analysis():
+    return render_template('customer_analysis.html')
+
+@app.route('/api/analyze_customer', methods=['POST'])
+def analyze_customer():
+    try:
+        data = request.get_json()
+        product_name = data.get('product_name')
+        customer_data = data.get('customer_data')
+        marketing_goal = data.get('marketing_goal')
+
+        # 构建 Prompt
+        # 这里我们利用 DashScope (通义千问) 或 OpenAI 接口
+        # 为了演示，如果没配置key，我们返回模拟数据
+        
+        prompt = f"""
+        你是一位专业的消费心理学家和金牌电商文案。
+        
+        【任务 1：客户画像分析】
+        请根据以下客户数据，分析该客户的：
+        1. 核心需求（Need）
+        2. 痛点/担忧（Pain Point）
+        3. 消费能力与偏好（Buying Power）
+        4. 心理关键词（3-5个标签）
+        
+        客户数据：
+        "{customer_data}"
+        
+        【任务 2：精准营销话术生成】
+        商品：{product_name}
+        营销目标：{marketing_goal} (conversion=转化, trust=信任, recall=召回)
+        
+        请针对上述分析出的客户画像，写一段直击人心的营销话术。
+        要求：
+        - 不要用通用的广告语，要针对他/她的具体痛点。
+        - 语气风格要符合营销目标。
+        - 300字以内。
+        
+        【输出格式】
+        请直接返回 JSON 格式字符串，不要包含 Markdown 代码块：
+        {{
+            "analysis": "这里是 markdown 格式的客户画像分析...",
+            "copy": "这里是生成的营销话术..."
+        }}
+        """
+
+        # 尝试调用大模型 (这里优先尝试 DashScope，如果失败则返回模拟数据)
+        try:
+            import dashscope
+            # 检查是否有 API KEY，如果没有则使用模拟数据
+            api_key = os.getenv('DASHSCOPE_API_KEY')
+            if not api_key:
+                 raise Exception("No API Key configured")
+
+            response = dashscope.Generation.call(
+                model=dashscope.Generation.Models.qwen_turbo,
+                prompt=prompt,
+                api_key=api_key
+            )
+            
+            if response.status_code == HTTPStatus.OK:
+                content = response.output.text
+                # 尝试解析 JSON
+                # 有时候模型会包裹在 ```json ... ``` 中
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    result = json.loads(json_match.group(0))
+                    return jsonify({'status': 'success', 'analysis': result['analysis'], 'copy': result['copy']})
+                else:
+                    # 如果解析失败，直接返回全文
+                    return jsonify({'status': 'success', 'analysis': content, 'copy': "解析格式失败，请查看分析结果"})
+            else:
+                 raise Exception(f"API Error: {response.message}")
+
+        except Exception as e:
+            print(f"LLM调用失败，使用模拟/规则兜底: {e}")
+            # 模拟返回 (当没有 API Key 时展示效果)
+            mock_analysis = f"""
+            **核心需求**：用户对{product_name}有明确兴趣，但存在疑虑。
+            **痛点**：{customer_data[:20]}... (基于输入推测)
+            **标签**：`价格敏感` `追求性价比` `需建立信任`
+            """
+            mock_copy = f"""
+            👋 亲，看到您对{product_name}很感兴趣！
+            
+            针对您担心的...问题，我们这款产品特别采用了...
+            
+            🔥 现在下单还有限时优惠，支持7天无理由退换，试错成本我们承担！
+            """
+            return jsonify({'status': 'success', 'analysis': mock_analysis, 'copy': mock_copy})
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 
 
 @app.route('/submit-form-data', methods=['POST'])
@@ -438,9 +601,41 @@ def dify_chat_stream():
 
 @app.route('/')
 def index():
-    return redirect(url_for('login')) # 访问 localhost:5000 时自动跳转到登录页
+    return redirect("http://localhost:3002/login") # Redirect to Login Server
 
-# 视频生成-------------------------------------------------------------------------------
+# ----------------- Dashboard Redirects -----------------
+def video_generation_worker(task_id, ak, sk, generate_uuid):
+    db = Task_Db()
+    try:
+        print(f"Task {task_id}: Starting video generation wait for {generate_uuid}")
+        db.update_task_status(task_id, 'processing')
+        
+        # This blocks
+        videos = wait_for_video(ak, sk, generate_uuid)
+        
+        if videos:
+            video_data = videos[0]
+            result = {
+                'video_url': video_data.get('videoUrl'),
+                'cover_url': video_data.get('coverPath'),
+                'points_cost': video_data.get("pointsCost", 0),
+                'log': [
+                    '状态变更: 执行中 -> 任务成功',
+                    f'任务进度: 任务成功, 完成度: 100.0%',
+                    f'消耗点数: {video_data.get("pointsCost", 0)}',
+                    '视频生成成功！'
+                ]
+            }
+            db.update_task_status(task_id, 'completed', result=result)
+            print(f"Task {task_id}: Video generation completed")
+        else:
+            db.update_task_status(task_id, 'failed', error='视频生成超时或失败')
+            print(f"Task {task_id}: Video generation failed (timeout or error)")
+            
+    except Exception as e:
+        print(f"Task {task_id}: Error: {e}")
+        db.update_task_status(task_id, 'failed', error=str(e))
+
 @app.route('/api/generate_video', methods=['POST'])
 def handle_generate_video():
     data = request.get_json()
@@ -506,26 +701,83 @@ def handle_generate_video():
         if result.get("code") == 0 and result.get("data", {}).get("generateUuid"):
             generate_uuid = result["data"]["generateUuid"]
             
-            # 等待任务完成
-            videos = wait_for_video(ak, sk, generate_uuid)
-            if videos:
-                video_data = videos[0]
-                return jsonify({
-                    'status': 'success',
-                    'video_url': video_data.get('videoUrl'),
-                    'cover_url': video_data.get('coverPath'),
-                    'log': [
-                        '状态变更: 执行中 -> 任务成功',
-                        f'任务进度: 任务成功, 完成度: 100.0%',
-                        f'消耗点数: {video_data.get("pointsCost", 0)}',
-                        '视频生成成功！'
-                    ]
-                })
+            # Generate task ID
+            task_id = str(uuid.uuid4())
+            
+            # Save initial status to DB
+            Task_Db().add_task(task_id, 'video_generation')
+            
+            # Start background thread
+            Thread(target=video_generation_worker, args=(task_id, ak, sk, generate_uuid)).start()
+            
+            return jsonify({
+                'status': 'success',
+                'task_id': task_id,
+                'message': '任务已提交，请稍后查询状态'
+            })
             
         return jsonify({'status': 'error', 'error': result.get('msg', '视频生成失败')}), 500
         
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/check_task_status/<task_id>', methods=['GET'])
+def check_task_status(task_id):
+    task = Task_Db().get_task(task_id)
+    if task:
+        try:
+            if task.get('result'):
+                task['result'] = json.loads(task['result'])
+        except:
+            pass
+            
+        return jsonify({'status': 'success', 'task': task})
+    else:
+        return jsonify({'status': 'error', 'error': 'Task not found'}), 404
+
+@app.route('/api/tasks/<task_type>', methods=['GET'])
+def get_tasks_by_type(task_type):
+    tasks = Task_Db().get_tasks_by_type(f"{task_type}_generation")
+    # 如果找不到，尝试不带 _generation 后缀
+    if not tasks:
+        tasks = Task_Db().get_tasks_by_type(task_type)
+        
+    return jsonify({'status': 'success', 'tasks': tasks})
+
+@app.route('/api/dashboard/generated_content', methods=['GET'])
+def get_dashboard_generated_content():
+    try:
+        tasks = Task_Db().get_recent_success_tasks(limit=8)
+        processed_tasks = []
+        for task in tasks:
+            try:
+                result = json.loads(task['result']) if task['result'] else {}
+                item = {
+                    'id': task['id'],
+                    'type': task['type'],
+                    'created_at': task['created_at'],
+                    'preview_url': '',
+                    'url': ''
+                }
+                
+                if 'image' in task['type']:
+                    item['preview_url'] = result.get('image_url')
+                    item['url'] = result.get('image_url')
+                    item['icon'] = 'fa-image'
+                elif 'video' in task['type']:
+                    item['preview_url'] = result.get('cover_url')
+                    item['url'] = result.get('video_url')
+                    item['icon'] = 'fa-video-camera'
+                
+                if item['preview_url']:
+                    processed_tasks.append(item)
+            except Exception as e:
+                print(f"Error processing task for dashboard: {e}")
+                
+        return jsonify({'status': 'success', 'tasks': processed_tasks})
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 
 
 # 数字人启动exe-------------------------------------------------------------------------------
@@ -549,6 +801,7 @@ def run_exe():
     try:
         # 检查文件是否存在
         if not os.path.exists(exe_path):
+            print(f"Error: Executable not found at {exe_path}")
             return jsonify({
                 'msg': 'error',
                 'error_message': f'文件不存在: {exe_path}',
@@ -559,7 +812,10 @@ def run_exe():
             }), 404
 
         # 启动程序
-        subprocess.Popen(exe_path)
+        print(f"Starting executable: {exe_path}")
+        exe_dir = os.path.dirname(exe_path)
+        subprocess.Popen(exe_path, cwd=exe_dir)
+        
         return jsonify({
             'msg': 'success',
             'path': exe_path,
@@ -761,6 +1017,61 @@ def get_img2img_handler():
         img2img_handler = Img2imgHandler()
     return img2img_handler
 
+# -------------------------------------------------------------------------------------------
+def image_generation_worker(task_id, generate_uuid):
+    db = Task_Db()
+    try:
+        print(f"Task {task_id}: Starting image generation wait for {generate_uuid}")
+        db.update_task_status(task_id, 'processing')
+        
+        # Poll LiblibAI status
+        max_retries = 60
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            status_response = img2img_handler.check_status(generate_uuid)
+            
+            if status_response.get("code") != 0:
+                print(f"Task {task_id}: Status check failed: {status_response.get('msg')}")
+                retry_count += 1
+                time.sleep(2)
+                continue
+                
+            data = status_response.get("data", {})
+            status = data.get("generateStatus")
+            
+            # Status: 5=Success, 6=Failed
+            if status == 5:
+                images = data.get("images", [])
+                if images and len(images) > 0:
+                    image_url = images[0].get("imageUrl")
+                    result = {
+                        'image_url': image_url,
+                        'percent': 100
+                    }
+                    db.update_task_status(task_id, 'completed', result=result)
+                    print(f"Task {task_id}: Image generation completed")
+                    return
+                else:
+                    db.update_task_status(task_id, 'failed', error='生成成功但未返回图片')
+                    return
+                    
+            elif status == 6:
+                db.update_task_status(task_id, 'failed', error='LiblibAI任务失败')
+                return
+                
+            # Update progress if needed (optional, db updates can be expensive if too frequent)
+            # percent = data.get("percentCompleted", 0)
+            
+            retry_count += 1
+            time.sleep(2)
+            
+        db.update_task_status(task_id, 'failed', error='任务超时')
+        
+    except Exception as e:
+        print(f"Task {task_id}: Error: {e}")
+        db.update_task_status(task_id, 'failed', error=str(e))
+
 @app.route('/api/generate_img2img', methods=['POST'])
 def generate_img2img():
     try:
@@ -790,12 +1101,23 @@ def generate_img2img():
                 "data": None
             }), 500
 
+        generate_uuid = submit_response["data"]["generateUuid"]
+        
+        # Generate task ID for our local DB
+        task_id = str(uuid.uuid4())
+        
+        # Save initial status to DB
+        Task_Db().add_task(task_id, 'image_generation')
+        
+        # Start background thread
+        Thread(target=image_generation_worker, args=(task_id, generate_uuid)).start()
+
         return jsonify({
             "code": 0,
-            "msg": "",
+            "msg": "任务已提交",
             "data": {
-                "generateUuid": submit_response["data"]["generateUuid"],
-                "checkUrl": "/api/check_img2img_status"
+                "task_id": task_id,
+                "generateUuid": generate_uuid # Keep for backward compat if needed
             }
         })
 
@@ -835,27 +1157,18 @@ def check_img2img_status():
             "data": None
         }), 500
 
-# -------------------------------------------------------------------------------------------
-#登录界面
-@app.route('/api/login', methods=['POST'])
-def handle_login():
-    data = request.get_json()
-    # 简单验证
-    if data.get('email') == 'zxhy' and data.get('password') == '12345678':
-        return jsonify({'status': 'success'})
-    else:
-        return jsonify({'status': 'error', 'message': 'Invalid credentials'}), 401
 
 
-@app.route('/home')
-def home():
-    # 原有主页逻辑
-    return render_template('index_main.html')
 
 
 @app.route('/product_marketing')
 def product_marketing():
     return render_template('product_marketing.html')
+
+@app.route('/setting')
+def setting():
+    config_util.load_config()
+    return render_template('setting.html', config=config_util.config)
 
 @app.route('/test1')  # 广告文案
 def test1():
@@ -867,9 +1180,12 @@ def test2():
     return render_template('test2.html', oss_custom_domain=OSS_CONFIG.get('CUSTOM_DOMAIN'))
 
 
+
 @app.route('/test3')  # 宣传视频
 def test3():
     return render_template('test3.html')
+
+
 
 
 # @app.route('/test4')  # 直播数字人
@@ -885,9 +1201,7 @@ def calendar():
     return render_template('calendar.html')
 
 
-@app.route('/login')
-def login():
-    return render_template('login.html')
+
 
 @app.route('/note')
 def note():
@@ -1645,10 +1959,6 @@ def generate_img2img(image_url):
             return {'status': 'error', 'error': submit_response.get('msg')}
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
-'''
-if __name__ == '__main__':
-    #app.run(host='localhost', port=5000)
-'''
 
 def run():
     server = pywsgi.WSGIServer(('0.0.0.0', 5000), app)
@@ -1656,20 +1966,18 @@ def run():
 
 def start():
     try:
-        print(">>> Auto-starting WebSocket servers...")
-        ui = wsa_server.get_web_instance()
-        human = wsa_server.get_instance()
-
-        if ui is None or not ui.is_running():
-            wsa_server.new_web_instance(port=10003).start_server()
-
-        if human is None or not human.is_running():
-            wsa_server.new_instance(port=10004).start_server()
-        wsa_server.start_port_forwarder(listen_port=10000, target_port=10004)
+        if wsa_server.ensure_bootstrap():
+            print(">>> Auto-starting WebSocket servers...")
     except Exception as e:
         print(f"WebSocket auto-start failed: {e}")
 
     MyThread(target=run).start()
+
+if __name__ == '__main__':
+    start()
+    # Keep main thread alive
+    while True:
+        time.sleep(1)
 
 # 在后端添加简单记录
 GENERATION_HISTORY = []
@@ -1789,10 +2097,7 @@ def upload_image():
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
 
-@app.route('/setting')
-def setting():
-    config_util.load_config()
-    return render_template('setting.html', config=config_util.config)
+
 
 @app.route('/api/get-data', methods=['post'])
 def api_get_data():

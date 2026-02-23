@@ -67,7 +67,7 @@
 
 <div id="top" class="clearfix">
     <div class="applogo">
-        <a href="{{ url_for('home') }}" class="logo">
+        <a href="http://localhost:5000/home" class="logo">
             <span class="logo-text">智创电商营销系统</span>
             <span class="logo-glow"></span>
         </a>
@@ -83,20 +83,27 @@
 
 <div class="sidebar clearfix">
     <ul class="sidebar-panel nav">
-        <li><a href="{{ url_for('home') }}"><span class="icon color5"><i class="fa fa-home"></i></span>首页</a></li>
+        <li><a href="http://localhost:5000/home"><span class="icon color5"><i class="fa fa-home"></i></span>首页</a></li>
         <li><a href="#"><span class="icon color10"><i class="fa fa-th"></i></span>商品信息管理<span class="caret"></span></a>
             <ul>
-                <li><a href="{{ url_for('product_management') }}">商品基础信息库</a></li>
-                <li><a href="{{ url_for('product_marketing') }}">商品营销素材库</a></li>
+                <li><a href="http://localhost:5000/product_management">商品基础信息库</a></li>
+                <li><a href="http://localhost:5000/product_marketing">商品营销素材库</a></li>
             </ul>
         </li>
-        <li><a href="{{ url_for('test1') }}"><span class="icon color5"><i class="fa fa-comment-o"></i></span>文案智造器</a></li>
-        <li><a href="{{ url_for('test2') }}" class="active"><span class="icon color11"><i class="fa fa-photo"></i></span>营销图创作</a></li>
-        <li><a href="{{ url_for('test3') }}"><span class="icon color8"><i class="fa fa-film"></i></span>短视频智造</a></li>
-        <li><a href="{{ url_for('setting') }}"><span class="icon color12"><i class="fa fa-smile-o"></i></span>数字直播大厅</a></li>
-        <li><a href="{{ url_for('calendar') }}"><span class="icon color8"><i class="fa fa-calendar-o"></i></span>营销日程规划</a></li>
-        <li><a href="{{ url_for('note') }}"><span class="icon color8"><i class="fa fa-bullhorn"></i></span>营销笔记发布</a></li>
-        <li><a href="http://127.0.0.1:5000"><span class="icon color5"><i class="fa fa-desktop"></i></span>登录</a></li>
+        <li><a href="http://localhost:5000/test1"><span class="icon color5"><i class="fa fa-comment-o"></i></span>文案智造器</a></li>
+        <li><a href="http://localhost:5000/test2" class="active"><span class="icon color11"><i class="fa fa-photo"></i></span>营销图创作</a></li>
+        <li><a href="http://localhost:5000/test3"><span class="icon color8"><i class="fa fa-film"></i></span>短视频智造</a></li>
+        <li><a href="http://localhost:5000/setting"><span class="icon color12"><i class="fa fa-smile-o"></i></span>数字直播大厅</a></li>
+        <li><a href="http://localhost:5000/calendar"><span class="icon color8"><i class="fa fa-calendar-o"></i></span>营销日程规划<span class="label label-danger">NEW</span></a></li>
+        <li><a href="http://localhost:5000/note"><span class="icon color8"><i class="fa fa-bullhorn"></i></span>营销笔记发布</a></li>
+        <li><a href="#"><span class="icon color8"><i class="fa fa-mortar-board"></i></span>数据统计<span class="caret"></span></a>
+            <ul>
+                <li><a href="http://localhost:5001/sign_up.html">商家来源统计</a></li>
+                <li><a href="http://localhost:5001/dashboard_internal.html">程序员数据看板</a></li>
+                <li><a href="http://localhost:5001/dashboard.html">用户数据看板</a></li>
+            </ul>
+        </li>
+        <li><a href="http://localhost:3000/login"><span class="icon color5"><i class="fa fa-desktop"></i></span>登录</a></li>
     </ul>
 </div>
 
@@ -148,18 +155,7 @@
                     </div>
                 </div>
 
-                <div class="panel panel-border-animated" id="history-panel">
-                    <div class="panel-title">
-                        <i class="fa fa-history"></i> 历史生成记录
-                        <button class="btn btn-xs btn-danger pull-right" onclick="clearHistory()">清空</button>
-                    </div>
-                    <div class="panel-body">
-                        <div id="history-list" class="row" style="max-height: 300px; overflow-y: auto;">
-                            <!-- 历史记录将通过JS动态插入 -->
-                            <div class="col-xs-12 text-center text-muted">暂无历史记录</div>
-                        </div>
-                    </div>
-                </div>
+
 
                 <div class="panel panel-border-animated" id="progress-panel" style="display:none;">
                     <div class="panel-title"><i class="fa fa-spinner fa-spin"></i> 生成进度</div>
@@ -177,6 +173,28 @@
                 </div>
 
                 <div class="panel panel-border-animated mt-3 d-none" id="upload-confirm-panel"></div>
+
+                <!-- 历史任务面板 -->
+                <div class="panel panel-border-animated" style="margin-top: 20px;">
+                    <div class="panel-title">
+                        <i class="fa fa-history"></i> 生成历史
+                    </div>
+                    <div class="panel-body">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>任务ID</th>
+                                    <th>状态</th>
+                                    <th>时间</th>
+                                    <th>结果</th>
+                                </tr>
+                            </thead>
+                            <tbody id="taskHistoryBody">
+                                <!-- 历史记录将通过JS插入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -211,7 +229,9 @@ $(document).ready(function() {
     $('#product-select').change(updateImagePreview);
     
     // 加载历史记录
-    loadHistory();
+    loadTaskHistory();
+    // 自动轮询
+    setInterval(loadTaskHistory, 5000);
 
     // 核心生成逻辑
     $('#image-gen-form').submit(async function(e) {
@@ -220,11 +240,11 @@ $(document).ready(function() {
         // UI重置
         $('#submit-btn').prop('disabled', true);
         $('#progress-panel').show();
-        $('#gen-progress').css('width', '0%').removeClass('bg-danger');
+        $('#gen-progress').css('width', '0%').removeClass('bg-danger').removeClass('bg-success');
         $('#progress-text').text('0%');
         $('#upload-confirm-panel').addClass('d-none');
+        $('#status-text').text('任务提交中...');
 
-        const startTime = Date.now();
         const imageUrl = $('#selected-image-url').val();
 
         if (!imageUrl) {
@@ -237,7 +257,7 @@ $(document).ready(function() {
         try {
             // 1. 提交任务
             const genResponse = await $.ajax({
-                url: '/api/generate_img2img', // 确保后端路由已改名避免冲突
+                url: '/api/generate_img2img', 
                 type: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify({ image_url: imageUrl }),
@@ -246,79 +266,125 @@ $(document).ready(function() {
 
             if (genResponse.code !== 0) throw new Error(genResponse.msg || '任务提交失败');
 
-            const taskId = genResponse.data.generateUuid;
-            let retryCount = 0;
-            const maxRetries = 60; // 【修复】最大轮询次数 (60次 * 2秒 = 2分钟超时)
-
-            // 2. 轮询状态
-            while (retryCount < maxRetries) {
-                const statusResponse = await $.ajax({
-                    url: '/api/check_img2img_status',
-                    type: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ generateUuid: taskId }),
-                    timeout: 10000
-                });
-
-                if (statusResponse.code !== 0) throw new Error('状态查询失败: ' + statusResponse.msg);
-
-                const status = statusResponse.data.generateStatus;
-                const percent = Math.floor((statusResponse.data.percentCompleted || 0) * 100);
-
-                // 更新UI
-                $('#gen-progress').css('width', `${percent}%`);
-                $('#progress-text').text(`${percent}%`);
-                $('#time-elapsed').text(Math.floor((Date.now() - startTime) / 1000) + '秒');
-
-                // 成功 (Status 5)
-                if (status === 5) {
-                    if (statusResponse.data.images?.length > 0) {
-                        const imgData = statusResponse.data.images[0];
-                        // 【修复】添加时间戳防止浏览器缓存旧图片
-                        const finalUrl = imgData.imageUrl + '?t=' + Date.now();
-
-                        $('#generated-image').attr('src', finalUrl);
-                        $('#progress-panel').hide();
-                        $('#submit-btn').prop('disabled', false);
-
-                        // 调用成功处理函数显示上传按钮
-                        handleImageGenerationSuccess({
-                            status: 'success',
-                            image_url: imgData.imageUrl // 这里传原始URL给后端，显示用finalUrl
-                        });
-                        
-                        // 保存到历史记录
-                        saveToHistory(imgData.imageUrl);
-                        
-                        alert('图片生成成功！');
-                    } else {
-                        throw new Error('未返回有效图片数据');
-                    }
-                    break;
-                }
-
-                // 失败 (假设 6 是失败状态，根据您的后端逻辑调整)
-                if (status === 6 || status === -1) {
-                    throw new Error('后端返回任务失败状态');
-                }
-
-                retryCount++;
-                await new Promise(r => setTimeout(r, 2000)); // 等待2秒
-            }
-
-            if (retryCount >= maxRetries) {
-                throw new Error('生成超时，请稍后重试');
-            }
+            const taskId = genResponse.data.task_id;
+            
+            $('#status-text').text('任务已提交，后台生成中...');
+            
+            // 立即刷新历史
+            loadTaskHistory();
+            
+            // 开始轮询状态
+            pollTaskStatus(taskId);
 
         } catch (error) {
             console.error('Error:', error);
             $('#gen-progress').css('width', '100%').addClass('bg-danger');
             $('#progress-text').text('失败');
+            $('#status-text').text('错误: ' + (error.message || '未知错误'));
             alert('错误: ' + (error.message || '未知错误'));
             $('#submit-btn').prop('disabled', false);
         }
     });
 });
+
+function pollTaskStatus(taskId) {
+    const startTime = Date.now();
+    const pollInterval = setInterval(() => {
+        $.get(`/api/check_task_status/${taskId}`)
+        .done(function(response) {
+            if (response.status === 'success') {
+                const task = response.task;
+                
+                // 更新时间
+                $('#time-elapsed').text(Math.floor((Date.now() - startTime) / 1000) + '秒');
+                
+                if (task.status === 'completed') {
+                    clearInterval(pollInterval);
+                    $('#gen-progress').css('width', '100%').addClass('bg-success');
+                    $('#progress-text').text('100%');
+                    $('#status-text').text('生成完成');
+                    
+                    const result = task.result; // 已解析
+                    if (result && result.image_url) {
+                         const finalUrl = result.image_url;
+                         $('#generated-image').attr('src', finalUrl);
+                         $('#submit-btn').prop('disabled', false);
+                         
+                         handleImageGenerationSuccess({
+                            status: 'success',
+                            image_url: finalUrl
+                        });
+                        
+                        alert('图片生成成功！');
+                    }
+                    
+                } else if (task.status === 'failed') {
+                    clearInterval(pollInterval);
+                    $('#gen-progress').css('width', '100%').addClass('bg-danger');
+                    $('#status-text').text('任务失败: ' + task.error);
+                    $('#submit-btn').prop('disabled', false);
+                } else {
+                    // processing
+                    $('#status-text').text('生成中...');
+                    // 模拟进度
+                    let currentWidth = parseFloat($('#gen-progress')[0].style.width) || 10;
+                    if (currentWidth < 90) {
+                        $('#gen-progress').css('width', (currentWidth + 5) + '%');
+                        $('#progress-text').text(Math.floor(currentWidth + 5) + '%');
+                    }
+                }
+            }
+        });
+    }, 2000);
+}
+
+// 加载任务历史
+function loadTaskHistory() {
+    $.get('/api/tasks/image')
+    .done(function(response) {
+        if (response.status === 'success') {
+            const $tbody = $('#taskHistoryBody');
+            $tbody.empty();
+            
+            if (response.tasks.length === 0) {
+                $tbody.html('<tr><td colspan="4" class="text-center text-muted">暂无历史记录</td></tr>');
+                return;
+            }
+            
+            response.tasks.forEach(task => {
+                let statusBadge = '';
+                let action = '';
+                
+                if (task.status === 'completed') {
+                    statusBadge = '<span class="label label-success">完成</span>';
+                    try {
+                        const result = JSON.parse(task.result);
+                        if (result.image_url) {
+                            action = `<a href="${result.image_url}" target="_blank" class="btn btn-xs btn-info"><i class="fa fa-eye"></i> 查看</a> 
+                                      <button onclick="$('#generated-image').attr('src', '${result.image_url}')" class="btn btn-xs btn-primary"><i class="fa fa-arrow-up"></i> 预览</button>`;
+                        }
+                    } catch(e) {}
+                } else if (task.status === 'processing') {
+                    statusBadge = '<span class="label label-warning">生成中...</span>';
+                } else if (task.status === 'failed') {
+                    statusBadge = '<span class="label label-danger">失败</span>';
+                    action = `<span class="text-danger" title="${task.error}">${task.error}</span>`;
+                } else {
+                    statusBadge = '<span class="label label-default">等待中</span>';
+                }
+                
+                $tbody.append(`
+                    <tr>
+                        <td>${task.id.substring(0, 8)}...</td>
+                        <td>${statusBadge}</td>
+                        <td>${new Date(task.created_at).toLocaleString()}</td>
+                        <td>${action}</td>
+                    </tr>
+                `);
+            });
+        }
+    });
+}
 
 // 处理生成成功逻辑
 function handleImageGenerationSuccess(response) {
@@ -438,49 +504,7 @@ function uploadToOSS(url) {
     });
 }
 
-// 历史记录功能
-function loadHistory() {
-    const history = JSON.parse(localStorage.getItem('gen_img_history') || '[]');
-    const container = $('#history-list');
-    container.empty();
-    
-    if (history.length === 0) {
-        container.html('<div class="col-xs-12 text-center text-muted" style="padding: 20px;">暂无历史记录</div>');
-        return;
-    }
-    
-    history.reverse().forEach(url => {
-        const item = `
-            <div class="col-xs-4 col-md-3" style="margin-bottom: 10px; padding: 0 5px;">
-                <div class="thumbnail" style="margin-bottom: 0; padding: 2px; border: 1px solid #444; background: rgba(0,0,0,0.3);">
-                    <img src="${url}" style="width: 100%; height: 80px; object-fit: cover; cursor: pointer;" 
-                         onclick="$('#generated-image').attr('src', '${url}'); handleImageGenerationSuccess({status:'success', image_url:'${url}'})"
-                         title="点击预览/操作">
-                </div>
-            </div>
-        `;
-        container.append(item);
-    });
-}
 
-function saveToHistory(url) {
-    let history = JSON.parse(localStorage.getItem('gen_img_history') || '[]');
-    // 去重
-    if (!history.includes(url)) {
-        history.push(url);
-        // 最多保存20条
-        if (history.length > 20) history.shift();
-        localStorage.setItem('gen_img_history', JSON.stringify(history));
-        loadHistory();
-    }
-}
-
-function clearHistory() {
-    if(confirm('确定要清空所有历史记录吗？')) {
-        localStorage.removeItem('gen_img_history');
-        loadHistory();
-    }
-}
 </script>
 
 <script src="{{ url_for('static', filename='js/particles.min.js') }}"></script>

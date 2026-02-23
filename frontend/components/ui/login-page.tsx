@@ -25,7 +25,7 @@ export default function LoginPage() {
       // 简单本地验证
       if (email === 'zxhy' && password === '12345678') {
         // 调用Flask后端API
-        // 使用相对路径 /api/login，Next.js 会根据 rewrites 代理到 http://localhost:5000/api/login
+        // 使用相对路径，通过Next.js代理转发
         const response = await fetch('/api/login', {
           method: 'POST',
           headers: {
@@ -35,8 +35,17 @@ export default function LoginPage() {
         })
 
         if (response.ok) {
-          // 登录成功后跳转到主页
-          window.location.href = 'http://localhost:5000/home'
+          const data = await response.json();
+          if (data.status === 'success') {
+             // 登录成功后跳转到主页，动态获取主机名
+             const targetHost = window.location.hostname;
+             window.location.href = `http://${targetHost}:5000/home`
+          } else {
+             alert(data.message || '登录失败')
+          }
+        } else {
+           // 处理非200响应
+           alert(`登录请求失败: ${response.status}`)
         }
       } else {
         alert('账号或密码错误')

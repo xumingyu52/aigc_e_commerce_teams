@@ -78,7 +78,7 @@
 <div id="top" class="clearfix">
     <!-- Logo -->
     <div class="applogo">
-        <a href="index_main.html" class="logo">
+        <a href="http://localhost:5000/home" class="logo">
             <span class="logo-text">智创电商营销系统</span>
             <span class="logo-glow"></span>
         </a>
@@ -116,20 +116,27 @@
 <!-- START SIDEBAR -->
 <div class="sidebar clearfix">
     <ul class="sidebar-panel nav">
-        <li><a href="/home"><span class="icon color5"><i class="fa fa-home"></i></span>首页</a></li>
+        <li><a href="http://localhost:5000/home"><span class="icon color5"><i class="fa fa-home"></i></span>首页</a></li>
         <li><a href="#"><span class="icon color10"><i class="fa fa-th"></i></span>商品信息管理<span class="caret"></span></a>
             <ul>
-                <li><a href="/product_management">商品基础信息库</a></li>
-                <li><a href="/product_marketing">商品营销素材库</a></li>
+                <li><a href="http://localhost:5000/product_management">商品基础信息库</a></li>
+                <li><a href="http://localhost:5000/product_marketing">商品营销素材库</a></li>
             </ul>
         </li>
-        <li><a href="test1"><span class="icon color5"><i class="fa fa-comment-o"></i></span>文案智造器</a></li>
-        <li><a href="test2"><span class="icon color11"><i class="fa fa-photo"></i></span>营销图创作</a></li>
-        <li><a href="test3" class="active"><span class="icon color8"><i class="fa fa-film"></i></span>短视频智造</a></li>
-        <li><a href="http://127.0.0.1:5000/setting"><span class="icon color12"><i class="fa fa-smile-o"></i></span>数字直播大厅</a></li>
-        <li><a href="calendar"><span class="icon color8"><i class="fa fa-calendar-o"></i></span>营销日程规划<span class="label label-danger">NEW</span></a></li>
-        <li><a href="note"><span class="icon color8"><i class="fa fa-bullhorn"></i></span>营销笔记发布</a></li>
-        <li><a href="http://127.0.0.1:5000"><span class="icon color5"><i class="fa fa-desktop"></i></span>登录</a></li>
+        <li><a href="http://localhost:5000/test1"><span class="icon color5"><i class="fa fa-comment-o"></i></span>文案智造器</a></li>
+        <li><a href="http://localhost:5000/test2"><span class="icon color11"><i class="fa fa-photo"></i></span>营销图创作</a></li>
+        <li><a href="http://localhost:5000/test3" class="active"><span class="icon color8"><i class="fa fa-film"></i></span>短视频智造</a></li>
+        <li><a href="http://localhost:5000/setting"><span class="icon color12"><i class="fa fa-smile-o"></i></span>数字直播大厅</a></li>
+        <li><a href="http://localhost:5000/calendar"><span class="icon color8"><i class="fa fa-calendar-o"></i></span>营销日程规划<span class="label label-danger">NEW</span></a></li>
+        <li><a href="http://localhost:5000/note"><span class="icon color8"><i class="fa fa-bullhorn"></i></span>营销笔记发布</a></li>
+        <li><a href="#"><span class="icon color8"><i class="fa fa-mortar-board"></i></span>数据统计<span class="caret"></span></a>
+            <ul>
+                <li><a href="http://localhost:5001/sign_up.html">商家来源统计</a></li>
+                <li><a href="http://localhost:5001/dashboard_internal.html">程序员数据看板</a></li>
+                <li><a href="http://localhost:5001/dashboard.html">用户数据看板</a></li>
+            </ul>
+        </li>
+        <li><a href="http://localhost:3000/login"><span class="icon color5"><i class="fa fa-desktop"></i></span>登录</a></li>
     </ul>
 </div>
 <!-- END SIDEBAR -->
@@ -142,7 +149,7 @@
     <div class="page-header">
         <h1 class="title">视频生成</h1>
         <ol class="breadcrumb">
-            <li><a href="/">首页</a></li>
+            <li><a href="http://localhost:5000/home">首页</a></li>
             <li class="active">视频生成</li>
         </ol>
     </div>
@@ -227,6 +234,28 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- 历史任务面板 -->
+                <div class="panel panel-border-animated" style="margin-top: 20px;">
+                    <div class="panel-title">
+                        <i class="fa fa-history"></i> 生成历史
+                    </div>
+                    <div class="panel-body">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>任务ID</th>
+                                    <th>状态</th>
+                                    <th>时间</th>
+                                    <th>结果</th>
+                                </tr>
+                            </thead>
+                            <tbody id="taskHistoryBody">
+                                <!-- 历史记录将通过JS插入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -251,6 +280,10 @@
 $(document).ready(function() {
     // 初始化加载所有分类
     loadVideoCategories();
+    loadTaskHistory();
+
+    // 自动轮询历史
+    setInterval(loadTaskHistory, 5000);
 
     // 分类选择变化时加载商品
     $('#video-product-category').change(function() {
@@ -357,6 +390,48 @@ function updateVideoImagePreview() {
     }
 }
 
+// 加载任务历史
+function loadTaskHistory() {
+    $.get('/api/tasks/video')
+    .done(function(response) {
+        if (response.status === 'success') {
+            const $tbody = $('#taskHistoryBody');
+            $tbody.empty();
+            
+            response.tasks.forEach(task => {
+                let statusBadge = '';
+                let action = '';
+                
+                if (task.status === 'completed') {
+                    statusBadge = '<span class="label label-success">完成</span>';
+                    try {
+                        const result = JSON.parse(task.result);
+                        if (result.video_url) {
+                            action = `<a href="${result.video_url}" target="_blank" class="btn btn-xs btn-primary"><i class="fa fa-play"></i> 观看</a>`;
+                        }
+                    } catch(e) {}
+                } else if (task.status === 'processing') {
+                    statusBadge = '<span class="label label-warning">生成中...</span>';
+                } else if (task.status === 'failed') {
+                    statusBadge = '<span class="label label-danger">失败</span>';
+                    action = `<span class="text-danger" title="${task.error}">${task.error}</span>`;
+                } else {
+                    statusBadge = '<span class="label label-default">等待中</span>';
+                }
+                
+                $tbody.append(`
+                    <tr>
+                        <td>${task.id.substring(0, 8)}...</td>
+                        <td>${statusBadge}</td>
+                        <td>${new Date(task.created_at).toLocaleString()}</td>
+                        <td>${action}</td>
+                    </tr>
+                `);
+            });
+        }
+    });
+}
+
 // 视频生成函数
 function generateVideoFromImage(imageUrl) {
     // 获取文本描述内容
@@ -365,7 +440,7 @@ function generateVideoFromImage(imageUrl) {
     // 显示加载状态
     $('#resultPanel').show();
     $('#resultContainer').hide();
-    $('.progress-bar').css('width', '0%').addClass('active');
+    $('.progress-bar').css('width', '10%').addClass('active');
     $('#statusLog').html('');
 
     function logStatus(message) {
@@ -387,24 +462,15 @@ function generateVideoFromImage(imageUrl) {
         }),
         success: function(response) {
             if (response.status === 'success') {
-                // 更新进度和日志
-                response.log.forEach(log => logStatus(log));
-                logStatus(`视频URL: ${response.video_url}`);
-                logStatus(`封面图: ${response.cover_url}`);
+                logStatus(`任务已提交! 任务ID: ${response.task_id}`);
+                logStatus('服务器正在后台生成，您可以离开此页面，稍后在下方历史记录中查看结果。');
                 
-                // 显示结果
-                $('#inputImage').attr('src', response.cover_url);
-                $('#outputVideo').attr('src', response.video_url);
-                $('#downloadBtn').attr('href', response.video_url);
+                // 立即刷新一次历史
+                loadTaskHistory();
                 
-                $('.progress-bar').css('width', '100%').removeClass('active');
-                $('#resultContainer').show();
+                // 开始轮询这个特定任务的状态，以便更新进度条
+                pollTaskStatus(response.task_id);
                 
-                // 自动保存到OSS
-                const productId = $('#video-product-select').val();
-                if (productId) {
-                    saveGeneratedVideo(productId, response.video_url);
-                }
             } else {
                 throw new Error(response.error || '视频生成失败');
             }
@@ -413,10 +479,56 @@ function generateVideoFromImage(imageUrl) {
             const errorMsg = xhr.responseJSON && xhr.responseJSON.error ? 
                             xhr.responseJSON.error : '请求失败';
             logStatus(`生成失败: ${errorMsg}`);
-            $('.progress-bar').css('width', '100%').removeClass('active');
+            $('.progress-bar').css('width', '100%').removeClass('active').addClass('progress-bar-danger');
         }
     });
 }
+
+function pollTaskStatus(taskId) {
+    const pollInterval = setInterval(() => {
+        $.get(`/api/check_task_status/${taskId}`)
+        .done(function(response) {
+            if (response.status === 'success') {
+                const task = response.task;
+                if (task.status === 'completed') {
+                    clearInterval(pollInterval);
+                    $('.progress-bar').css('width', '100%').removeClass('active').addClass('progress-bar-success');
+                    
+                    const result = task.result; // 已由后端解析为dict
+                    
+                    // 显示结果
+                    if (result && result.video_url) {
+                         $('#inputImage').attr('src', result.cover_url);
+                         $('#outputVideo').attr('src', result.video_url);
+                         $('#downloadBtn').attr('href', result.video_url);
+                         $('#resultContainer').show();
+                         
+                         // 更新日志
+                         if (result.log) {
+                             result.log.forEach(l => {
+                                 const timestamp = new Date().toLocaleTimeString();
+                                 $('#statusLog').append(`<div>[${timestamp}] ${l}</div>`);
+                             });
+                         }
+                    }
+                    
+                } else if (task.status === 'failed') {
+                    clearInterval(pollInterval);
+                    $('.progress-bar').css('width', '100%').removeClass('active').addClass('progress-bar-danger');
+                    $('#statusLog').append(`<div class="text-danger">任务失败: ${task.error}</div>`);
+                } else {
+                    // processing
+                    // 模拟进度增加
+                    let currentWidth = parseFloat($('.progress-bar')[0].style.width) || 10;
+                    if (currentWidth < 90) {
+                        $('.progress-bar').css('width', (currentWidth + 5) + '%');
+                    }
+                }
+            }
+        });
+    }, 3000);
+}
+
 
 // 保存生成的视频到OSS
 function saveGeneratedVideo(productId, videoUrl) {

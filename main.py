@@ -31,6 +31,8 @@ from asr import ali_nls
 from core import wsa_server
 from gui import flask_server
 from gui import aigc_server
+from gui import login_server
+from gui import app as dashboard_server
 from gui.window import MainWindow
 from core import content_db
 import pandas as pd
@@ -93,18 +95,8 @@ if __name__ == '__main__':
     # 只有当不是 Flask 的重载进程时，才启动这些 WebSocket 服务
     if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
         print(">>> 正在启动核心服务...")
-        print(">>> Auto-starting WebSocket servers...")
-
-        # 1. 启动数字人接口服务 (默认 10004)
-        ws_server = wsa_server.new_instance(port=10004)
-        ws_server.start_server()
-        
-        # 2. 额外监听 10000 并转发到 10004，兼容旧 UE5 客户端
-        wsa_server.start_port_forwarder(listen_port=10000, target_port=10004)
-        
-        # 启动UI数据接口服务 (10003)
-        web_ws_server = wsa_server.new_web_instance(port=10003)
-        web_ws_server.start_server()
+        if wsa_server.ensure_bootstrap():
+            print(">>> Auto-starting WebSocket servers...")
 
         # 启动阿里云asr
         if config_util.ASR_mode == "ali":
@@ -112,7 +104,24 @@ if __name__ == '__main__':
     # --- 关键修改结束 ---
 
     # 启动http服务器
-    aigc_server.start()
-    flask_server.start()  # web，如果这里面有 debug=True，它会重启子进程
+    try:
+        login_server.start()
+    except Exception as e:
+        print(f"Failed to start login_server: {e}")
+    
+    try:
+        dashboard_server.start()
+    except Exception as e:
+        print(f"Failed to start dashboard_server: {e}")
+
+    try:
+        aigc_server.start()
+    except Exception as e:
+        print(f"Failed to start aigc_server: {e}")
+    
+    try:
+        flask_server.start()  # web，如果这里面有 debug=True，它会重启子进程
+    except Exception as e:
+        print(f"Failed to start flask_server: {e}")
 
     # ... 后面的代码保持不变 ...
