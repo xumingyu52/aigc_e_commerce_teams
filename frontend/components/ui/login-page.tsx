@@ -2,21 +2,50 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Eye, EyeOff } from "lucide-react"
+import { Eye, EyeOff, Sparkles, BarChart3, Share2, Video, User, Lock, ArrowRight } from "lucide-react"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
   const router = useRouter()
+  
+  // 3D 倾斜卡片状态
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [cardTransform, setCardTransform] = useState({ rotateX: 0, rotateY: 0 })
+  const [isHovering, setIsHovering] = useState(false)
+  
+  // 鼠标移动处理
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cardRef.current) return
+    const rect = cardRef.current.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / rect.width - 0.5
+    const y = (e.clientY - rect.top) / rect.height - 0.5
+    setCardTransform({
+      rotateX: -y * 15,
+      rotateY: x * 15
+    })
+  }, [])
+  
+  // 鼠标离开处理
+  const handleMouseLeave = useCallback(() => {
+    setCardTransform({ rotateX: 0, rotateY: 0 })
+    setIsHovering(false)
+  }, [])
+  
+  // 鼠标进入处理
+  const handleMouseEnter = useCallback(() => {
+    setIsHovering(true)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -204,10 +233,16 @@ export default function LoginPage() {
                 </div>
                 <div className="flex items-center space-x-2">
                   <Checkbox
-                    id="remember"
-                    className="border-blue-400 data-[state=checked]:bg-blue-500"
+                    id="remember-dark"
+                    checked={rememberMe}
+                    onCheckedChange={(checked) => {
+                      if (typeof checked === 'boolean') {
+                        setRememberMe(checked)
+                      }
+                    }}
+                    className="border-blue-400 data-[state=checked]:bg-blue-500 cursor-pointer"
                   />
-                  <Label htmlFor="remember" className="text-sm font-normal text-blue-100">
+                  <Label htmlFor="remember-dark" className="text-sm font-normal text-blue-100 cursor-pointer">
                     记住我
                   </Label>
                 </div>
@@ -235,100 +270,207 @@ export default function LoginPage() {
       </div>
 
       <div className="relative z-10 w-full max-w-[1060px] grid md:auto-cols-max md:grid-flow-col gap-0 md:justify-center items-center px-4">
-        {/* 左侧：项目介绍（近透明玻璃，略小，位置下移） */}
-        <div className="hidden md:block w-full max-w-[360px] md:translate-y-12">
-          <div className="relative rounded-[16px] border border-white/30 bg-white/8 backdrop-blur-lg shadow-[inset_0_1px_0_rgba(255,255,255,0.45),_0_8px_24px_rgba(2,6,23,0.06)] px-8 py-8 min-h-[500px] flex flex-col justify-center">
-            <div className="mb-4 text-slate-800 text-2xl font-semibold tracking-[-0.02em]">项目介绍</div>
-            <div className="text-slate-700 font-medium leading-7 text-[15px]">
-              智创电商营销系统，集成内容生产、投放分发、数据看板与智能分析，助力商家实现全链路增长。
-            </div>
-            <div className="mt-6 grid grid-cols-2 gap-3 text-[13px] text-slate-700 font-medium">
-              <div className="rounded-lg border border-white/30 bg-white/12 backdrop-blur-md px-3 py-2">AI文案/图片生成</div>
-              <div className="rounded-lg border border-white/30 bg-white/12 backdrop-blur-md px-3 py-2">商品看板与洞察</div>
-              <div className="rounded-lg border border-white/30 bg-white/12 backdrop-blur-md px-3 py-2">多渠道投放管理</div>
-              <div className="rounded-lg border border-white/30 bg-white/12 backdrop-blur-md px-3 py-2">数字人直播互动</div>
+        {/* 左侧：项目介绍（毛玻璃3D倾斜卡片） */}
+        <div className="hidden md:block w-full max-w-[360px] md:translate-y-12" style={{ perspective: '1000px' }}>
+          <div 
+            ref={cardRef}
+            className="relative rounded-[20px] duration-300 ease-out will-change-transform"
+            style={{
+              transform: `rotateX(${cardTransform.rotateX}deg) rotateY(${cardTransform.rotateY}deg)`,
+              transformStyle: 'preserve-3d',
+              transitionProperty: 'transform'
+            }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            onMouseEnter={handleMouseEnter}
+          >
+            {/* 外层发光阴影 - 营造悬浮感 */}
+            <div 
+              className="absolute -inset-3 rounded-[26px] bg-gradient-to-b from-blue-400/40 via-cyan-400/30 to-blue-500/40 blur-2xl transition-opacity duration-300"
+              style={{ opacity: isHovering ? 0.9 : 0.5 }}
+            ></div>
+            <div className="absolute -inset-2 rounded-[24px] bg-gradient-to-br from-blue-300/20 to-indigo-400/20 blur-xl opacity-60"></div>
+            
+            {/* 主体毛玻璃卡片 */}
+            <div className="relative rounded-[20px] border border-white/70 bg-white/25 backdrop-blur-2xl shadow-[0_25px_80px_-20px_rgba(59,130,246,0.25),0_0_0_1px_rgba(255,255,255,0.4)_inset,0_0_30px_rgba(147,197,253,0.2)] px-8 py-8 min-h-[500px] flex flex-col justify-center overflow-hidden">
+              
+              {/* 顶部高光 */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-white to-transparent"></div>
+              <div className="pointer-events-none absolute inset-x-8 top-1 h-[1px] bg-gradient-to-r from-transparent via-white/60 to-transparent"></div>
+              
+              {/* 内部光晕效果 */}
+              <div className="pointer-events-none absolute -top-20 -right-20 w-60 h-60 bg-gradient-to-br from-blue-200/20 to-transparent rounded-full blur-3xl"></div>
+              <div className="pointer-events-none absolute -bottom-20 -left-20 w-60 h-60 bg-gradient-to-tr from-cyan-200/15 to-transparent rounded-full blur-3xl"></div>
+              
+              {/* 边框发光效果 */}
+              <div className="pointer-events-none absolute inset-0 rounded-[20px] shadow-[inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-1px_0_rgba(255,255,255,0.3)]"></div>
+              
+              {/* 内容层 */}
+              <div className="relative z-10" style={{ transform: 'translateZ(20px)' }}>
+                <div className="mb-4 text-slate-800 text-2xl font-bold tracking-[-0.02em]">项目介绍</div>
+                <div className="text-slate-700 font-medium leading-7 text-[15px]">
+                  智创电商营销系统，集成内容生产、投放分发、数据看板与智能分析，助力商家实现全链路增长。
+                </div>
+                <div className="mt-6 grid grid-cols-2 gap-3 text-[13px]">
+                  <div className="group rounded-xl border border-white/60 bg-white/40 backdrop-blur-md px-3 py-2.5 text-slate-700 font-medium shadow-[0_2px_8px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] flex items-center gap-2 hover:bg-white/50 hover:shadow-[0_4px_12px_rgba(59,130,246,0.15)] hover:border-blue-300/70 transition-all duration-300" style={{ transform: 'translateZ(30px)' }}>
+                    <Sparkles className="w-4 h-4 text-blue-600" />
+                    <span>AI文案/图片生成</span>
+                  </div>
+                  <div className="group rounded-xl border border-white/60 bg-white/40 backdrop-blur-md px-3 py-2.5 text-slate-700 font-medium shadow-[0_2px_8px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] flex items-center gap-2 hover:bg-white/50 hover:shadow-[0_4px_12px_rgba(99,102,241,0.15)] hover:border-indigo-300/70 transition-all duration-300" style={{ transform: 'translateZ(30px)' }}>
+                    <BarChart3 className="w-4 h-4 text-indigo-600" />
+                    <span>商品看板与洞察</span>
+                  </div>
+                  <div className="group rounded-xl border border-white/60 bg-white/40 backdrop-blur-md px-3 py-2.5 text-slate-700 font-medium shadow-[0_2px_8px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] flex items-center gap-2 hover:bg-white/50 hover:shadow-[0_4px_12px_rgba(6,182,212,0.15)] hover:border-cyan-300/70 transition-all duration-300" style={{ transform: 'translateZ(30px)' }}>
+                    <Share2 className="w-4 h-4 text-cyan-600" />
+                    <span>多渠道投放管理</span>
+                  </div>
+                  <div className="group rounded-xl border border-white/60 bg-white/40 backdrop-blur-md px-3 py-2.5 text-slate-700 font-medium shadow-[0_2px_8px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] flex items-center gap-2 hover:bg-white/50 hover:shadow-[0_4px_12px_rgba(139,92,246,0.15)] hover:border-violet-300/70 transition-all duration-300" style={{ transform: 'translateZ(30px)' }}>
+                    <Video className="w-4 h-4 text-violet-600" />
+                    <span>数字人直播互动</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* 右侧登录卡片（白底，略大，位置上移） */}
+        {/* 右侧登录卡片（现代悬浮风格） */}
         <div className="w-full max-w-[650px] md:-ml-4 md:-translate-y-8">
-          <div className="relative">
-            <Card className={"relative z-10 bg-white border border-slate-200 shadow-[0_20px_40px_rgba(0,0,0,0.08)] rounded-[12px] overflow-hidden"}>
-              <CardHeader className="space-y-1 px-10 pt-10">
-                <h1 className="text-3xl font-bold tracking-[-0.02em] text-center text-slate-800 mb-2 whitespace-nowrap leading-tight">智创电商营销系统</h1>
-                <CardDescription className="text-center text-slate-600 tracking-[-0.005em]">请输入您的账号和密码登录系统</CardDescription>
+          <div className="relative group">
+            {/* 外层悬浮阴影 */}
+            <div className="absolute -inset-1 rounded-[24px] bg-gradient-to-b from-blue-500/20 via-blue-400/10 to-slate-400/20 blur-xl opacity-60 group-hover:opacity-80 transition-opacity duration-500"></div>
+            <div className="absolute -inset-0.5 rounded-[20px] bg-slate-900/5 blur-lg"></div>
+            
+            <Card className="relative z-10 bg-gradient-to-b from-white to-slate-50/80 border border-slate-100 shadow-[0_25px_80px_-20px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.8)_inset] rounded-[16px] overflow-hidden transition-all duration-300 hover:shadow-[0_30px_90px_-20px_rgba(0,0,0,0.15)]">
+              {/* 顶部装饰线 */}
+              <div className="h-1 w-full bg-blue-500"></div>
+              
+              <CardHeader className="space-y-3 px-10 pt-10 pb-4">
+                <h1 className="text-3xl font-bold tracking-tight text-center text-slate-800 whitespace-nowrap leading-tight">
+                  智创电商营销系统
+                </h1>
+                {/* 装饰性下划线 */}
+                <div className="flex justify-center">
+                  <div className="w-16 h-[3px] bg-blue-500 rounded-full"></div>
+                </div>
+                <CardDescription className="text-center text-slate-500 text-sm tracking-wide pt-1">
+                  请输入您的账号和密码登录系统
+                </CardDescription>
               </CardHeader>
+              
               <form onSubmit={handleSubmit}>
-                <CardContent className="space-y-5 max-w-md mx-auto mt-6 px-10">
+                <CardContent className="space-y-6 max-w-md mx-auto mt-8 px-10">
+                  {/* 账号输入框 */}
                   <div className="space-y-2">
-                    <Label className="text-slate-600" htmlFor="username">账号</Label>
-                    <div className="relative rounded-[12px] border border-white/40 bg-white/15 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.55),_0_8px_24px_rgba(2,6,23,0.06)] transition-shadow focus-within:shadow-[0_10px_30px_rgba(2,6,23,0.08)]">
-                      <div className="pointer-events-none absolute inset-0 rounded-[12px] bg-gradient-to-b from-white/45 via-white/15 to-white/8"></div>
-                      <div className="relative">
-                        <Input
-                          id="username"
-                          className="h-12 rounded-[12px] px-4 border-0 bg-transparent text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0"
-                          type="text"
-                          placeholder="请输入账号"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          required
-                        />
+                    <Label className="text-slate-700 text-sm font-medium" htmlFor="username">账号</Label>
+                    <div className="relative group/input">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <User className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-500 transition-colors duration-200" />
                       </div>
+                      <Input
+                        id="username"
+                        className="h-14 rounded-xl pl-11 pr-4 border-2 border-slate-200 bg-white text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0 focus-visible:border-blue-500 focus-visible:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] transition-all duration-200"
+                        type="text"
+                        placeholder="请输入账号"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                      />
                     </div>
                   </div>
+                  
+                  {/* 密码输入框 */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label className="text-slate-600" htmlFor="password">密码</Label>
-                      <a href="#" className="text-sm text-slate-500 hover:text-slate-700 hover:underline">忘记密码?</a>
+                      <Label className="text-slate-700 text-sm font-medium" htmlFor="password">密码</Label>
+                      <a href="#" className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors duration-200">忘记密码?</a>
                     </div>
-                    <div className="relative rounded-[12px] border border-white/40 bg-white/15 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.55),_0_8px_24px_rgba(2,6,23,0.06)] transition-shadow focus-within:shadow-[0_10px_30px_rgba(2,6,23,0.08)]">
-                      <div className="pointer-events-none absolute inset-0 rounded-[12px] bg-gradient-to-b from-white/45 via-white/15 to-white/8"></div>
-                      <div className="relative">
-                        <Input
-                          id="password"
-                          className="h-12 rounded-[12px] px-4 pr-10 border-0 bg-transparent text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0"
-                          type={showPassword ? "text" : "password"}
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          required
-                        />
-                        <button
-                          type="button"
-                          aria-label={showPassword ? "隐藏密码" : "显示密码"}
-                          onClick={() => setShowPassword((v) => !v)}
-                          className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
-                        >
-                          {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                        </button>
+                    <div className="relative group/input">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-500 transition-colors duration-200" />
                       </div>
+                      <Input
+                        id="password"
+                        className="h-14 rounded-xl pl-11 pr-12 border-2 border-slate-200 bg-white text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0 focus-visible:border-blue-500 focus-visible:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] transition-all duration-200"
+                        type={showPassword ? "text" : "password"}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="button"
+                        aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 transition-colors duration-200"
+                      >
+                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="remember" className="border-slate-400 data-[state=checked]:bg-blue-600" />
-                    <Label htmlFor="remember" className="text-sm font-normal text-slate-600">记住我</Label>
+                  
+                  {/* 记住我 */}
+                  <div className="flex items-center space-x-3">
+                    <Checkbox 
+                      id="remember" 
+                      checked={rememberMe}
+                      onCheckedChange={(checked) => {
+                        if (typeof checked === 'boolean') {
+                          setRememberMe(checked)
+                        }
+                      }}
+                      className="border-2 border-slate-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 h-5 w-5 cursor-pointer" 
+                    />
+                    <Label 
+                      htmlFor="remember" 
+                      className="text-sm font-medium text-slate-600 cursor-pointer select-none"
+                    >
+                      记住我
+                    </Label>
                   </div>
                 </CardContent>
-                <CardFooter className="max-w-md mx-auto px-10 pb-10">
+                
+                <CardFooter className="max-w-md mx-auto px-10 pb-6">
                   <Button
                     type="submit"
-                    className="h-12 w-full rounded-[12px] bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white font-semibold shadow-lg transition-all"
+                    className="h-14 w-full rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white font-semibold text-base shadow-[0_4px_14px_rgba(59,130,246,0.4)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.5)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:translate-y-0"
                     disabled={isLoading}
                   >
-                    {isLoading ? "登录中..." : "登录"}
+                    {isLoading ? (
+                      <span className="flex items-center gap-2">
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        登录中...
+                      </span>
+                    ) : "登录"}
                   </Button>
                 </CardFooter>
               </form>
-              <div className="px-8 pb-8 text-center text-sm text-slate-500">
-                还没有账号?{" "}
-                <a href="#" className="text-blue-600 hover:text-blue-700 hover:underline">
-                  注册
+              
+              {/* 分隔线 */}
+              <div className="px-10 py-4">
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-200"></div>
+                  </div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="px-4 bg-gradient-to-b from-white to-slate-50/80 text-slate-400">或</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* 注册链接 */}
+              <div className="px-8 pb-8 text-center">
+                <a href="#" className="group/link inline-flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 font-medium transition-all duration-200">
+                  还没有账号?
+                  <span className="text-blue-600 group-hover/link:text-blue-700 inline-flex items-center gap-1">
+                    立即注册
+                    <ArrowRight className="h-4 w-4 group-hover/link:translate-x-1 transition-transform duration-200" />
+                  </span>
                 </a>
               </div>
             </Card>
-            <div className="pointer-events-none absolute -inset-2 rounded-[16px] neon-ring z-0"></div>
-            <div className="pointer-events-none absolute -inset-6 rounded-[24px] neon-soft z-0"></div>
           </div>
         </div>
       </div>
