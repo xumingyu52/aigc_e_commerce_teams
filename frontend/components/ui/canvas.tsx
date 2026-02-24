@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import React from 'react'
 
 interface CanvasProps {
@@ -9,8 +9,7 @@ interface CanvasProps {
 
 const Canvas: React.FC<CanvasProps> = ({ style }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [isLoading, setIsLoading] = useState(true)
-
+  
   useEffect(() => {
     if (!canvasRef.current) return
 
@@ -18,230 +17,142 @@ const Canvas: React.FC<CanvasProps> = ({ style }) => {
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    // Initialize variables
-    const pos = { x: 0, y: 0 }
-    let lines: Line[] = []
-    let f: SineWave
+    let width = window.innerWidth
+    let height = window.innerHeight
+    
+    // Mouse position
+    const mouse = { x: -1000, y: -1000 }
+    
+    const resize = () => {
+      width = window.innerWidth
+      height = window.innerHeight
+      canvas.width = width
+      canvas.height = height
+      initParticles()
+    }
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      mouse.x = e.clientX
+      mouse.y = e.clientY
+    }
+    
+    // Configuration from particles-init.js
+    const colors = ["#5eead4", "#38bdf8", "#22d3ee"]
+    const lineLinkColor = "rgba(94, 234, 212, 0.4)" 
+    const particleCount = Math.floor(width / 15)
+    const connectDistance = 120
+    const moveSpeed = 0.8
+    const interactionDistance = 140 // Repulse radius
 
-    // Configuration
-    const E = {
-      debug: true,
-      friction: 0.5,
-      trails: 80,
-      size: 50,
-      dampening: 0.025,
-      tension: 0.99,
+    interface Particle {
+      x: number
+      y: number
+      vx: number
+      vy: number
+      size: number
+      color: string
+      baseVx: number
+      baseVy: number
     }
 
-    // SineWave class
-    class SineWave {
-      phase: number
-      offset: number
-      frequency: number
-      amplitude: number
-      value = 0
+    let particles: Particle[] = []
 
-      constructor(options: { phase?: number; offset?: number; frequency?: number; amplitude?: number } = {}) {
-        this.phase = options.phase || 0
-        this.offset = options.offset || 0
-        this.frequency = options.frequency || 0.001
-        this.amplitude = options.amplitude || 1
+    const initParticles = () => {
+      particles = []
+      const count = Math.floor(width / 15)
+      for (let i = 0; i < count; i++) {
+        const vx = (Math.random() - 0.5) * moveSpeed * 2
+        const vy = (Math.random() - 0.5) * moveSpeed * 2
+        particles.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          vx: vx,
+          vy: vy,
+          baseVx: vx,
+          baseVy: vy,
+          size: Math.random() * 3 + 1,
+          color: colors[Math.floor(Math.random() * colors.length)]
+        })
       }
-
-      update() {
-        this.phase += this.frequency
-        this.value = this.offset + Math.sin(this.phase) * this.amplitude
-        return this.value
-      }
     }
 
-    // Node class
-    class Node {
-      x = 0
-      y = 0
-      vx = 0
-      vy = 0
-    }
-
-    // Line class
-    class Line {
-      spring: number
-      friction: number
-      nodes: Node[]
-
-      constructor(options: { spring?: number } = {}) {
-        this.spring = (options.spring || 0.45) + 0.1 * Math.random() - 0.05
-        this.friction = E.friction + 0.01 * Math.random() - 0.005
-        this.nodes = []
-
-        for (let i = 0; i < E.size; i++) {
-          const node = new Node()
-          node.x = pos.x
-          node.y = pos.y
-          this.nodes.push(node)
+    const draw = () => {
+      ctx.clearRect(0, 0, width, height)
+      
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i]
+        
+        // Interaction (Repulse)
+        const dx = mouse.x - p.x
+        const dy = mouse.y - p.y
+        const dist = Math.sqrt(dx*dx + dy*dy)
+        
+        if (dist < interactionDistance) {
+          const angle = Math.atan2(dy, dx)
+          const force = (interactionDistance - dist) / interactionDistance
+          const repulseX = Math.cos(angle) * force * 5
+          const repulseY = Math.sin(angle) * force * 5
+          
+          p.x -= repulseX
+          p.y -= repulseY
         }
-      }
 
-      update() {
-        let spring = this.spring
-        let node = this.nodes[0]
+        // Move
+        p.x += p.vx
+        p.y += p.vy
 
-        node.vx += (pos.x - node.x) * spring
-        node.vy += (pos.y - node.y) * spring
+        // Bounce
+        if (p.x < 0 || p.x > width) p.vx *= -1
+        if (p.y < 0 || p.y > height) p.vy *= -1
 
-        for (let i = 0, len = this.nodes.length; i < len; i++) {
-          node = this.nodes[i]
+        // Draw Point
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2)
+        ctx.fillStyle = p.color
+        ctx.globalAlpha = 0.7
+        ctx.fill()
+        
+        // Draw Connections
+        for (let j = i + 1; j < particles.length; j++) {
+          const p2 = particles[j]
+          const dx2 = p.x - p2.x
+          const dy2 = p.y - p2.y
+          const dist2 = Math.sqrt(dx2*dx2 + dy2*dy2)
 
-          if (i > 0) {
-            const prev = this.nodes[i - 1]
-            node.vx += (prev.x - node.x) * spring
-            node.vy += (prev.y - node.y) * spring
-            node.vx += prev.vx * E.dampening
-            node.vy += prev.vy * E.dampening
+          if (dist2 < connectDistance) {
+            ctx.beginPath()
+            ctx.strokeStyle = lineLinkColor
+            ctx.globalAlpha = 0.4 * (1 - dist2 / connectDistance)
+            ctx.lineWidth = 1
+            ctx.moveTo(p.x, p.y)
+            ctx.lineTo(p2.x, p2.y)
+            ctx.stroke()
           }
-
-          node.vx *= this.friction
-          node.vy *= this.friction
-          node.x += node.vx
-          node.y += node.vy
-
-          spring *= E.tension
         }
       }
-
-      draw() {
-        let x = this.nodes[0].x
-        let y = this.nodes[0].y
-        let nextNode, currentNode
-        let i: number
-        let len: number
-
-        ctx!.beginPath()
-        ctx!.moveTo(x, y)
-
-        for (i = 1, len = this.nodes.length - 2; i < len; i++) {
-          currentNode = this.nodes[i]
-          nextNode = this.nodes[i + 1]
-          x = 0.5 * (currentNode.x + nextNode.x)
-          y = 0.5 * (currentNode.y + nextNode.y)
-          ctx!.quadraticCurveTo(currentNode.x, currentNode.y, x, y)
-        }
-
-        currentNode = this.nodes[i]
-        nextNode = this.nodes[i + 1]
-        ctx!.quadraticCurveTo(currentNode.x, currentNode.y, nextNode.x, nextNode.y)
-        ctx!.stroke()
-        ctx!.closePath()
-      }
+      
+      requestAnimationFrame(draw)
     }
 
-    // Initialize lines
-    function initLines() {
-      lines = []
-      for (let i = 0; i < E.trails; i++) {
-        lines.push(new Line({ spring: 0.45 + (i / E.trails) * 0.025 }))
-      }
-    }
+    resize()
+    window.addEventListener('resize', resize)
+    window.addEventListener('mousemove', handleMouseMove)
+    const animId = requestAnimationFrame(draw)
 
-    // Handle mouse/touch movement
-    function handleMouseMove(e: MouseEvent | TouchEvent) {
-      if ("touches" in e) {
-        pos.x = e.touches[0].pageX
-        pos.y = e.touches[0].pageY
-      } else {
-        pos.x = e.clientX
-        pos.y = e.clientY
-      }
-      e.preventDefault()
-    }
-
-    function handleTouchStart(e: TouchEvent) {
-      if (e.touches.length === 1) {
-        pos.x = e.touches[0].pageX
-        pos.y = e.touches[0].pageY
-      }
-    }
-
-    // Resize canvas
-    function resizeCanvas() {
-      canvas.width = window.innerWidth - 20
-      canvas.height = window.innerHeight
-    }
-
-    // Animation frame
-    let animationFrameId: number
-    let running = true
-    let frame = 1
-
-    function render() {
-      if (!running) return
-
-      ctx!.globalCompositeOperation = "source-over"
-      ctx!.clearRect(0, 0, canvas.width, canvas.height)
-      ctx!.globalCompositeOperation = "lighter"
-      ctx!.strokeStyle = `hsla(${Math.round(f.update())},100%,50%,0.025)`
-      ctx!.lineWidth = 10
-
-      for (let i = 0; i < E.trails; i++) {
-        const line = lines[i]
-        line.update()
-        line.draw()
-      }
-
-      frame++
-      animationFrameId = window.requestAnimationFrame(render)
-    }
-
-    // Initialize
-    f = new SineWave({
-      phase: Math.random() * 2 * Math.PI,
-      amplitude: 85,
-      frequency: 0.0015,
-      offset: 285,
-    })
-
-    document.addEventListener("mousemove", handleMouseMove)
-    document.addEventListener("touchmove", handleMouseMove)
-    document.addEventListener("touchstart", handleTouchStart)
-    window.addEventListener("resize", resizeCanvas)
-    document.body.addEventListener("orientationchange", resizeCanvas)
-
-    window.addEventListener("focus", () => {
-      if (!running) {
-        running = true
-        render()
-      }
-    })
-
-    window.addEventListener("blur", () => {
-      running = true
-    })
-
-    resizeCanvas()
-    initLines()
-    render()
-
-    // Cleanup
     return () => {
-      running = false
-      window.cancelAnimationFrame(animationFrameId)
-      document.removeEventListener("mousemove", handleMouseMove)
-      document.removeEventListener("touchmove", handleMouseMove)
-      document.removeEventListener("touchstart", handleMouseMove)
-      window.removeEventListener("resize", resizeCanvas)
-      document.body.removeEventListener("orientationchange", resizeCanvas)
-      window.removeEventListener("focus", () => {})
-      window.removeEventListener("blur", () => {})
+      window.removeEventListener('resize', resize)
+      window.removeEventListener('mousemove', handleMouseMove)
+      cancelAnimationFrame(animId)
     }
   }, [])
 
-  useEffect(() => {
-    // 初始化完成后
-    setIsLoading(false)
-  }, [])
-
-  return <canvas id="canvas" ref={canvasRef} className="fixed top-0 left-0 w-full h-full touch-none" style={style} />
+  return (
+    <canvas 
+      ref={canvasRef} 
+      className="fixed top-0 left-0 w-full h-full pointer-events-none"
+      style={{ background: 'linear-gradient(135deg, #ffffff 0%, #93c5fd 50%, #64748b 100%)', ...style }} 
+    />
+  )
 }
 
 export default Canvas
-

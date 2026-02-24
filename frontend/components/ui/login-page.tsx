@@ -9,12 +9,13 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import Canvas from "./canvas"
+import { Eye, EyeOff } from "lucide-react"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -66,95 +67,25 @@ export default function LoginPage() {
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden">
 
-      {/* 背景 - 蓝白渐变 */}
+      {/* 背景 - 与内页蓝灰配色保持一致 */}
       <div className="absolute inset-0 z-0">
-        {/* 基础渐变层 - 蓝白色 */}
-        <Canvas style={{
-          background: 'linear-gradient(to top, #0c3483 0%, #a2b6df 100%, #6b8cce 100%, #a2b6df 100%)'
-        }} />
-
-        {/* 第一组光斑 - 蓝青色 */}
-        <div className="absolute -bottom-20 left-1/4 w-[600px] h-[600px] bg-blue-600/20 rounded-full blur-3xl animate-pulse"
-          style={{ animationDelay: '1.2s' }}>
-        </div>
-        <div className="absolute bottom-40 right-1/4 w-80 h-80 bg-cyan-500/20 rounded-full blur-3xl animate-pulse"
-          style={{ animationDelay: '1.8s' }}>
-        </div>
-
-        {/* 第二组光斑 - 深紫色 */}
-        <div className="absolute top-1/3 left-1/3 w-72 h-72 bg-violet-700/25 rounded-full blur-3xl animate-pulse"
-          style={{ animationDelay: '0.8s' }}>
-        </div>
-        <div className="absolute bottom-1/4 right-1/3 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl animate-pulse"
-          style={{ animationDelay: '2.2s' }}>
-        </div>
+        <div
+          className="w-full h-full"
+          style={{
+            backgroundImage:
+              'url(\"data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%27128%27 height=%27128%27 viewBox=%270 0 128 128%27><filter id=%27n%27 x=%270%27 y=%270%27 width=%27100%25%27 height=%27100%25%27><feTurbulence type=%27fractalNoise%27 baseFrequency=%270.8%27 numOctaves=%272%27 stitchTiles=%27stitch%27/></filter><rect width=%27128%27 height=%27128%27 filter=%27url(%23n)%27 opacity=%270.02%27/></svg>\") ,' +
+              'linear-gradient(180deg, #ffffff 0%, #e7effa 60%, #d9e3f0 100%)',
+            backgroundRepeat: 'repeat, no-repeat',
+            backgroundSize: '128px 128px, 100% 100%'
+          }}
+        />
       </div>
 
-      {/* 粒子系统 - 动态星星效果 */}
-      <div className="absolute inset-0 z-5 overflow-hidden pointer-events-none">
-        {/* 粒子层1 - 小星星 */}
-        {[...Array(50)].map((_, i) => (
-          <div
-            key={i}
-            className="absolute w-1 h-1 bg-white rounded-full animate-ping"
-            style={{
-              top: `${Math.random() * 100}%`,
-              left: `${Math.random() * 100}%`,
-              animationDuration: `${Math.random() * 3 + 2}s`,
-              animationDelay: `${Math.random() * 2}s`,
-              opacity: Math.random() * 0.5 + 0.3,
-              boxShadow: '0 0 6px 2px rgba(255, 255, 255, 0.3)'
-            }}
-          />
-        ))}
-
-        {/* 粒子层2 - 中等星星 */}
-        {[...Array(30)].map((_, i) => (
-          <div
-            key={`medium-${i}`}
-            className="absolute w-1.5 h-1.5 bg-blue-200 rounded-full animate-ping"
-            style={{
-              top: `${Math.random() * 100}%`,
-              left: `${Math.random() * 100}%`,
-              animationDuration: `${Math.random() * 4 + 3}s`,
-              animationDelay: `${Math.random() * 3}s`,
-              opacity: Math.random() * 0.4 + 0.2,
-              boxShadow: '0 0 10px 3px rgba(167, 139, 250, 0.4)'
-            }}
-          />
-        ))}
-
-        {/* 粒子层3 - 流动的光点 */}
-        {[...Array(20)].map((_, i) => (
-          <div
-            key={`flow-${i}`}
-            className="absolute w-2 h-2 bg-purple-300/40 rounded-full animate-pulse"
-            style={{
-              top: `${Math.random() * 100}%`,
-              left: `${Math.random() * 100}%`,
-              animationDuration: `${Math.random() * 5 + 4}s`,
-              animationDelay: `${Math.random() * 4}s`,
-              opacity: Math.random() * 0.3 + 0.1,
-              boxShadow: '0 0 15px 5px rgba(139, 92, 246, 0.3)',
-              transform: 'scale(1)'
-            }}
-          />
-        ))}
-      </div>
-
-      {/* 动态光斑 - 保留并增强 */}
-      <div className="absolute bottom-20 left-1/4 w-72 h-72 bg-violet-600/30 rounded-full blur-3xl animate-pulse"
-        style={{ animationDelay: '2s' }}>
-      </div>
-      <div className="absolute bottom-0 right-1/3 w-96 h-96 bg-indigo-600/25 rounded-full blur-3xl animate-pulse"
-        style={{ animationDelay: '1.5s' }}>
-      </div>
-
-      {/* 登录卡片 - 使用深蓝底色 */}
-      <div className="relative z-10 w-full max-w-[980px] px-4">
-        <Card className="bg-slate-800/90 backdrop-blur-sm border border-blue-600/30 shadow-2xl shadow-slate-900/90 min-h-[540px] grid md:grid-cols-5 overflow-hidden">
+      {/* 登录卡片 - 使用深蓝底色（已停用，保留备选） */}
+      <div className="hidden">
+        <Card className={"bg-slate-800/90 border border-blue-600/30 shadow-2xl shadow-slate-900/90 rounded-[12px] min-h-[500px] grid md:grid-cols-5 overflow-hidden"}>
           {/* ================= 左侧：抽象科技概念展示 ================= */}
-          <div className="hidden md:flex md:col-span-3 flex-col justify-center items-center bg-slate-900 relative overflow-hidden p-10">
+          <div className={"bg-slate-900 hidden md:flex md:col-span-3 flex-col justify-center items-center relative overflow-hidden p-10"}>
 
             {/* 背景：深邃的极光渐变 */}
             <div className="absolute inset-0 z-0">
@@ -163,7 +94,7 @@ export default function LoginPage() {
             </div>
 
             {/* 核心视觉：3D 悬浮引擎结构 */}
-            <div className="relative z-10 w-64 h-64 mb-12 flex items-center justify-center">
+            <div className="relative z-10 w-56 h-56 mb-10 flex items-center justify-center">
 
               {/* 外圈轨道 1 */}
               <div className="absolute w-full h-full border border-blue-500/20 rounded-full animate-[spin_10s_linear_infinite]">
@@ -201,11 +132,11 @@ export default function LoginPage() {
 
             {/* 文案区域 */}
             <div className="relative z-10 text-center space-y-4 max-w-sm">
-              <h2 className="text-3xl font-bold text-white tracking-tight">
+              <h2 className="text-4xl font-bold text-white tracking-[-0.02em]">
                 智能营销，从这里开始
               </h2>
               <div className="w-12 h-1 bg-blue-500 mx-auto rounded-full"></div>
-              <p className="text-slate-400 text-sm leading-relaxed">
+              <p className="text-slate-400 text-sm leading-relaxed tracking-[-0.005em]">
                 AI驱动营销革新，智能生成文案、图片、视频，数字人直播带货，助力品牌实现电商数字化转型升级。
               </p>
             </div>
@@ -218,26 +149,30 @@ export default function LoginPage() {
 
           </div>
           <div className="md:col-span-2">
-            <CardHeader className="space-y-1">
+            <CardHeader className="space-y-1 px-10 pt-10">
               {/* 系统名称使用亮蓝色 */}
-              <h1 className="text-3xl font-bold text-right text-blue-400 mb-2 mr-12 mt-14">智创电商营销系统</h1>
+              <h1 className="text-4xl font-bold tracking-[-0.02em] text-center text-blue-400 mb-2 mt-14">智创电商营销系统</h1>
               {/* 标题使用白色 */}
-              <CardDescription className="text-right text-blue-100 mr-[70px]">请输入您的账号和密码登录系统</CardDescription>
+              <CardDescription className="text-center text-blue-100 tracking-[-0.005em]">请输入您的账号和密码登录系统</CardDescription>
             </CardHeader>
 
             <form onSubmit={handleSubmit}>
-              <CardContent className="space-y-4 max-w-md ml-auto mt-8 mr-1 px-10">
+              <CardContent className="space-y-4 max-w-md ml-auto mt-6 mr-1 px-10">
                 <div className="space-y-2">
                   <Label className="text-blue-100" htmlFor="username">账号</Label>
-                  <Input
-                    id="username"
-                    className="bg-slate-700 border-blue-500/50 text-white focus:ring-blue-400 focus:border-blue-400"
-                    type="text"
-                    placeholder="请输入账号"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
+                  <div className="relative p-[1.5px] rounded-[12px] bg-gradient-to-r from-blue-500/30 to-slate-400/30 transition-shadow focus-within:shadow-[0_8px_24px_rgba(37,99,235,0.15)]">
+                    <div className="relative rounded-[11px] bg-white/60 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.55),_0_1px_1px_rgba(0,0,0,0.04)]">
+                      <Input
+                        id="username"
+                        className="h-10 rounded-[11px] px-4 border-0 bg-transparent text-slate-900 placeholder:text-slate-500 focus-visible:ring-0"
+                        type="text"
+                        placeholder="请输入账号"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -246,14 +181,26 @@ export default function LoginPage() {
                       忘记密码?
                     </a>
                   </div>
-                  <Input
-                    id="password"
-                    className="bg-slate-700 border-blue-500/50 text-white focus:ring-blue-400 focus:border-blue-400"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
+                  <div className="relative p-[1.5px] rounded-[12px] bg-gradient-to-r from-blue-500/30 to-slate-400/30 transition-shadow focus-within:shadow-[0_8px_24px_rgba(37,99,235,0.15)]">
+                    <div className="relative rounded-[11px] bg-white/60 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.55),_0_1px_1px_rgba(0,0,0,0.04)]">
+                      <Input
+                        id="password"
+                        className="h-10 rounded-[11px] px-4 pr-10 border-0 bg-transparent text-slate-900 placeholder:text-slate-500 focus-visible:ring-0"
+                        type={showPassword ? "text" : "password"}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="button"
+                        aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="absolute inset-y-0 right-3 flex items-center text-blue-400 hover:text-blue-500"
+                      >
+                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Checkbox
@@ -265,11 +212,11 @@ export default function LoginPage() {
                   </Label>
                 </div>
               </CardContent>
-              <CardFooter className="max-w-md mr-1 px-10">
+              <CardFooter className="max-w-md mr-1 px-10 pb-10">
                 {/* 按钮使用蓝色渐变 */}
                 <Button
                   type="submit"
-                  className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white font-medium shadow-lg transition-all"
+                  className="h-11 w-full rounded-[12px] bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white font-semibold shadow-lg transition-all"
                   disabled={isLoading}
                 >
                   {isLoading ? "登录中..." : "登录"}
@@ -287,6 +234,141 @@ export default function LoginPage() {
         </Card>
       </div>
 
+      <div className="relative z-10 w-full max-w-[1060px] grid md:auto-cols-max md:grid-flow-col gap-0 md:justify-center items-center px-4">
+        {/* 左侧：项目介绍（近透明玻璃，略小，位置下移） */}
+        <div className="hidden md:block w-full max-w-[360px] md:translate-y-12">
+          <div className="relative rounded-[16px] border border-white/30 bg-white/8 backdrop-blur-lg shadow-[inset_0_1px_0_rgba(255,255,255,0.45),_0_8px_24px_rgba(2,6,23,0.06)] px-8 py-8 min-h-[500px] flex flex-col justify-center">
+            <div className="mb-4 text-slate-800 text-2xl font-semibold tracking-[-0.02em]">项目介绍</div>
+            <div className="text-slate-700 font-medium leading-7 text-[15px]">
+              智创电商营销系统，集成内容生产、投放分发、数据看板与智能分析，助力商家实现全链路增长。
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-3 text-[13px] text-slate-700 font-medium">
+              <div className="rounded-lg border border-white/30 bg-white/12 backdrop-blur-md px-3 py-2">AI文案/图片生成</div>
+              <div className="rounded-lg border border-white/30 bg-white/12 backdrop-blur-md px-3 py-2">商品看板与洞察</div>
+              <div className="rounded-lg border border-white/30 bg-white/12 backdrop-blur-md px-3 py-2">多渠道投放管理</div>
+              <div className="rounded-lg border border-white/30 bg-white/12 backdrop-blur-md px-3 py-2">数字人直播互动</div>
+            </div>
+          </div>
+        </div>
+
+        {/* 右侧登录卡片（白底，略大，位置上移） */}
+        <div className="w-full max-w-[650px] md:-ml-4 md:-translate-y-8">
+          <div className="relative">
+            <Card className={"relative z-10 bg-white border border-slate-200 shadow-[0_20px_40px_rgba(0,0,0,0.08)] rounded-[12px] overflow-hidden"}>
+              <CardHeader className="space-y-1 px-10 pt-10">
+                <h1 className="text-3xl font-bold tracking-[-0.02em] text-center text-slate-800 mb-2 whitespace-nowrap leading-tight">智创电商营销系统</h1>
+                <CardDescription className="text-center text-slate-600 tracking-[-0.005em]">请输入您的账号和密码登录系统</CardDescription>
+              </CardHeader>
+              <form onSubmit={handleSubmit}>
+                <CardContent className="space-y-5 max-w-md mx-auto mt-6 px-10">
+                  <div className="space-y-2">
+                    <Label className="text-slate-600" htmlFor="username">账号</Label>
+                    <div className="relative rounded-[12px] border border-white/40 bg-white/15 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.55),_0_8px_24px_rgba(2,6,23,0.06)] transition-shadow focus-within:shadow-[0_10px_30px_rgba(2,6,23,0.08)]">
+                      <div className="pointer-events-none absolute inset-0 rounded-[12px] bg-gradient-to-b from-white/45 via-white/15 to-white/8"></div>
+                      <div className="relative">
+                        <Input
+                          id="username"
+                          className="h-12 rounded-[12px] px-4 border-0 bg-transparent text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0"
+                          type="text"
+                          placeholder="请输入账号"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-slate-600" htmlFor="password">密码</Label>
+                      <a href="#" className="text-sm text-slate-500 hover:text-slate-700 hover:underline">忘记密码?</a>
+                    </div>
+                    <div className="relative rounded-[12px] border border-white/40 bg-white/15 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.55),_0_8px_24px_rgba(2,6,23,0.06)] transition-shadow focus-within:shadow-[0_10px_30px_rgba(2,6,23,0.08)]">
+                      <div className="pointer-events-none absolute inset-0 rounded-[12px] bg-gradient-to-b from-white/45 via-white/15 to-white/8"></div>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          className="h-12 rounded-[12px] px-4 pr-10 border-0 bg-transparent text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0"
+                          type={showPassword ? "text" : "password"}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          required
+                        />
+                        <button
+                          type="button"
+                          aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                        >
+                          {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox id="remember" className="border-slate-400 data-[state=checked]:bg-blue-600" />
+                    <Label htmlFor="remember" className="text-sm font-normal text-slate-600">记住我</Label>
+                  </div>
+                </CardContent>
+                <CardFooter className="max-w-md mx-auto px-10 pb-10">
+                  <Button
+                    type="submit"
+                    className="h-12 w-full rounded-[12px] bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white font-semibold shadow-lg transition-all"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? "登录中..." : "登录"}
+                  </Button>
+                </CardFooter>
+              </form>
+              <div className="px-8 pb-8 text-center text-sm text-slate-500">
+                还没有账号?{" "}
+                <a href="#" className="text-blue-600 hover:text-blue-700 hover:underline">
+                  注册
+                </a>
+              </div>
+            </Card>
+            <div className="pointer-events-none absolute -inset-2 rounded-[16px] neon-ring z-0"></div>
+            <div className="pointer-events-none absolute -inset-6 rounded-[24px] neon-soft z-0"></div>
+          </div>
+        </div>
+      </div>
+      <style jsx global>{`
+        @keyframes neon-breathe {
+          0% { opacity: .55; filter: blur(6px) saturate(1.1); }
+          100% { opacity: .8; filter: blur(10px) saturate(1.25); }
+        }
+        .neon-ring {
+          background:
+            conic-gradient(
+              from 0deg,
+              rgba(34,211,238,0.0) 0deg,
+              rgba(34,211,238,0.35) 40deg,
+              rgba(59,130,246,0.9) 90deg,
+              rgba(147,197,253,1) 120deg,
+              rgba(59,130,246,0.9) 170deg,
+              rgba(34,211,238,0.35) 220deg,
+              rgba(34,211,238,0.0) 360deg
+            );
+          filter: blur(8px) saturate(1.2);
+          /* ring mask */
+          -webkit-mask:
+            linear-gradient(#000 0 0) content-box,
+            linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          padding: 2px;
+        }
+        .neon-soft {
+          box-shadow:
+            0 0 40px rgba(59,130,246,0.25),
+            0 0 80px rgba(34,211,238,0.15),
+            0 0 120px rgba(96,165,250,0.08);
+          background: radial-gradient(120% 120% at 50% 50%,
+            rgba(59,130,246,0.18), transparent 60%);
+          filter: blur(6px);
+          animation: neon-breathe 3.8s ease-in-out alternate infinite;
+        }
+      `}</style>
     </div>
   )
 }
