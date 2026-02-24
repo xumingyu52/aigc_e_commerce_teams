@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Eye, EyeOff, Sparkles, BarChart3, Share2, Video, User, Lock, ArrowRight } from "lucide-react"
+import ParticlesBackground from "./particles-background"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -96,19 +97,8 @@ export default function LoginPage() {
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden">
 
-      {/* 背景 - 与内页蓝灰配色保持一致 */}
-      <div className="absolute inset-0 z-0">
-        <div
-          className="w-full h-full"
-          style={{
-            backgroundImage:
-              'url(\"data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%27128%27 height=%27128%27 viewBox=%270 0 128 128%27><filter id=%27n%27 x=%270%27 y=%270%27 width=%27100%25%27 height=%27100%25%27><feTurbulence type=%27fractalNoise%27 baseFrequency=%270.8%27 numOctaves=%272%27 stitchTiles=%27stitch%27/></filter><rect width=%27128%27 height=%27128%27 filter=%27url(%23n)%27 opacity=%270.02%27/></svg>\") ,' +
-              'linear-gradient(180deg, #ffffff 0%, #e7effa 60%, #d9e3f0 100%)',
-            backgroundRepeat: 'repeat, no-repeat',
-            backgroundSize: '128px 128px, 100% 100%'
-          }}
-        />
-      </div>
+      {/* 粒子背景 */}
+      <ParticlesBackground />
 
       {/* 登录卡片 - 使用深蓝底色（已停用，保留备选） */}
       <div className="hidden">
@@ -271,7 +261,7 @@ export default function LoginPage() {
 
       <div className="relative z-10 w-full max-w-[1060px] grid md:auto-cols-max md:grid-flow-col gap-0 md:justify-center items-center px-4">
         {/* 左侧：项目介绍（毛玻璃3D倾斜卡片） */}
-        <div className="hidden md:block w-full max-w-[360px] md:translate-y-12" style={{ perspective: '1000px' }}>
+        <div className="hidden md:block w-full max-w-[360px] md:translate-y-16" style={{ perspective: '1000px' }}>
           <div 
             ref={cardRef}
             className="relative rounded-[20px] duration-300 ease-out will-change-transform"
@@ -292,7 +282,7 @@ export default function LoginPage() {
             <div className="absolute -inset-2 rounded-[24px] bg-gradient-to-br from-blue-300/20 to-indigo-400/20 blur-xl opacity-60"></div>
             
             {/* 主体毛玻璃卡片 */}
-            <div className="relative rounded-[20px] border border-white/70 bg-white/25 backdrop-blur-2xl shadow-[0_25px_80px_-20px_rgba(59,130,246,0.25),0_0_0_1px_rgba(255,255,255,0.4)_inset,0_0_30px_rgba(147,197,253,0.2)] px-8 py-8 min-h-[500px] flex flex-col justify-center overflow-hidden">
+            <div className="relative rounded-[20px] border border-white/70 bg-white/25 backdrop-blur-2xl shadow-[0_25px_80px_-20px_rgba(59,130,246,0.25),0_0_0_1px_rgba(255,255,255,0.4)_inset,0_0_30px_rgba(147,197,253,0.2)] px-8 py-8 min-h-[510px] flex flex-col justify-center overflow-hidden">
               
               {/* 顶部高光 */}
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-white to-transparent"></div>
@@ -343,7 +333,7 @@ export default function LoginPage() {
             
             <Card className="relative z-10 bg-gradient-to-b from-white to-slate-50/80 border border-slate-100 shadow-[0_25px_80px_-20px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.8)_inset] rounded-[16px] overflow-hidden transition-all duration-300 hover:shadow-[0_30px_90px_-20px_rgba(0,0,0,0.15)]">
               {/* 顶部装饰线 */}
-              <div className="h-1 w-full bg-blue-500"></div>
+              <div className="h-1 w-full bg-blue-400"></div>
               
               <CardHeader className="space-y-3 px-10 pt-10 pb-4">
                 <h1 className="text-3xl font-bold tracking-tight text-center text-slate-800 whitespace-nowrap leading-tight">
@@ -351,7 +341,7 @@ export default function LoginPage() {
                 </h1>
                 {/* 装饰性下划线 */}
                 <div className="flex justify-center">
-                  <div className="w-16 h-[3px] bg-blue-500 rounded-full"></div>
+                  <div className="w-16 h-[3px] bg-blue-400 rounded-full"></div>
                 </div>
                 <CardDescription className="text-center text-slate-500 text-sm tracking-wide pt-1">
                   请输入您的账号和密码登录系统
@@ -365,11 +355,11 @@ export default function LoginPage() {
                     <Label className="text-slate-700 text-sm font-medium" htmlFor="username">账号</Label>
                     <div className="relative group/input">
                       <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <User className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-500 transition-colors duration-200" />
+                        <User className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-400 transition-colors duration-200" />
                       </div>
                       <Input
                         id="username"
-                        className="h-14 rounded-xl pl-11 pr-4 border-2 border-slate-200 bg-white text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0 focus-visible:border-blue-500 focus-visible:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] transition-all duration-200"
+                        className="h-14 rounded-xl pl-11 pr-4 border-2 border-slate-200 bg-white text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0 focus-visible:border-blue-400 focus-visible:shadow-[0_0_0_4px_rgba(96,165,250,0.1)] transition-all duration-200"
                         type="text"
                         placeholder="请输入账号"
                         value={email}
@@ -383,15 +373,15 @@ export default function LoginPage() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label className="text-slate-700 text-sm font-medium" htmlFor="password">密码</Label>
-                      <a href="#" className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors duration-200">忘记密码?</a>
+                      <a href="#" className="text-sm text-blue-500 hover:text-blue-600 font-medium transition-colors duration-200">忘记密码?</a>
                     </div>
                     <div className="relative group/input">
                       <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-500 transition-colors duration-200" />
+                        <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-400 transition-colors duration-200" />
                       </div>
                       <Input
                         id="password"
-                        className="h-14 rounded-xl pl-11 pr-12 border-2 border-slate-200 bg-white text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0 focus-visible:border-blue-500 focus-visible:shadow-[0_0_0_4px_rgba(59,130,246,0.1)] transition-all duration-200"
+                        className="h-14 rounded-xl pl-11 pr-12 border-2 border-slate-200 bg-white text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0 focus-visible:border-blue-400 focus-visible:shadow-[0_0_0_4px_rgba(96,165,250,0.1)] transition-all duration-200"
                         type={showPassword ? "text" : "password"}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -418,7 +408,7 @@ export default function LoginPage() {
                           setRememberMe(checked)
                         }
                       }}
-                      className="border-2 border-slate-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 h-5 w-5 cursor-pointer" 
+                      className="border-2 border-slate-300 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 h-5 w-5 cursor-pointer" 
                     />
                     <Label 
                       htmlFor="remember" 
@@ -432,7 +422,7 @@ export default function LoginPage() {
                 <CardFooter className="max-w-md mx-auto px-10 pb-6">
                   <Button
                     type="submit"
-                    className="h-14 w-full rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white font-semibold text-base shadow-[0_4px_14px_rgba(59,130,246,0.4)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.5)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                    className="h-14 w-full rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white font-semibold text-base shadow-[0_4px_20px_rgba(59,130,246,0.5),0_0_0_1px_rgba(255,255,255,0.3)_inset] hover:shadow-[0_6px_30px_rgba(59,130,246,0.6),0_0_0_1px_rgba(255,255,255,0.4)_inset] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:translate-y-0"
                     disabled={isLoading}
                   >
                     {isLoading ? (
@@ -462,9 +452,9 @@ export default function LoginPage() {
               
               {/* 注册链接 */}
               <div className="px-8 pb-8 text-center">
-                <a href="#" className="group/link inline-flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 font-medium transition-all duration-200">
+                <a href="#" className="group/link inline-flex items-center gap-2 text-sm text-slate-600 hover:text-blue-500 font-medium transition-all duration-200">
                   还没有账号?
-                  <span className="text-blue-600 group-hover/link:text-blue-700 inline-flex items-center gap-1">
+                  <span className="text-blue-500 group-hover/link:text-blue-600 inline-flex items-center gap-1">
                     立即注册
                     <ArrowRight className="h-4 w-4 group-hover/link:translate-x-1 transition-transform duration-200" />
                   </span>
