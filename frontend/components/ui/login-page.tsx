@@ -324,16 +324,19 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* 右侧登录卡片（现代悬浮风格） */}
+        {/* 右侧登录卡片（精致流光边框效果） */}
         <div className="w-full max-w-[650px] md:-ml-4 md:-translate-y-8">
-          <div className="relative group">
-            {/* 外层悬浮阴影 */}
-            <div className="absolute -inset-1 rounded-[24px] bg-gradient-to-b from-blue-500/20 via-blue-400/10 to-slate-400/20 blur-xl opacity-60 group-hover:opacity-80 transition-opacity duration-500"></div>
-            <div className="absolute -inset-0.5 rounded-[20px] bg-slate-900/5 blur-lg"></div>
+          {/* ========== Layer 1: 容器 - 负责悬浮动画和裁剪，p-[2px] 精确控制边框宽度 ========== */}
+          <div className="relative w-full h-auto rounded-[24px] overflow-hidden z-0 p-[2px] animate-float group">
             
-            <Card className="relative z-10 bg-gradient-to-b from-white to-slate-50/80 border border-slate-100 shadow-[0_25px_80px_-20px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.8)_inset] rounded-[16px] overflow-hidden transition-all duration-300 hover:shadow-[0_30px_90px_-20px_rgba(0,0,0,0.15)] animate-levitate">
+            {/* ========== Layer 2: 光束层 - 柔和彗星拖尾效果 ========== */}
+            <div className="absolute inset-[-100%] w-[300%] h-[300%] bg-[conic-gradient(from_90deg_at_50%_50%,#0000_0%,#0000_50%,#bfdbfe_70%,#3b82f6_100%)] opacity-60 blur-md animate-spin-soft"></div>
+            
+            {/* ========== Layer 3: 内容遮罩层 - 纯白背景完全遮挡中间 ========== */}
+            <div className="relative h-full w-full bg-white rounded-[22px] shadow-[0_25px_80px_-20px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.8)_inset] z-10">
+              
               {/* 顶部装饰线 */}
-              <div className="h-1 w-full bg-blue-400"></div>
+              <div className="h-1 w-full bg-blue-400 rounded-t-[20px]"></div>
               
               <CardHeader className="space-y-3 px-10 pt-10 pb-4">
                 <h1 className="text-3xl font-bold tracking-tight text-center text-slate-800 whitespace-nowrap leading-tight">
@@ -350,48 +353,50 @@ export default function LoginPage() {
               
               <form onSubmit={handleSubmit}>
                 <CardContent className="space-y-6 max-w-md mx-auto mt-8 px-10">
-                  {/* 账号输入框 */}
+                  {/* 账号输入框 - 轻拟态内凹风格 */}
                   <div className="space-y-2">
                     <Label className="text-slate-700 text-sm font-medium" htmlFor="username">账号</Label>
                     <div className="relative group/input">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <User className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-400 transition-colors duration-200" />
+                      <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none z-10">
+                        <User className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-500 transition-colors duration-200" />
                       </div>
                       <Input
                         id="username"
-                        className="h-14 rounded-xl pl-11 pr-4 border-2 border-slate-200 bg-white text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0 focus-visible:border-blue-400 focus-visible:shadow-[0_0_0_4px_rgba(96,165,250,0.1)] transition-all duration-200"
+                        className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 pl-12 pr-5 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-200 focus:shadow-[inset_2px_2px_3px_rgba(71,85,105,0.2),inset_6px_6px_16px_rgba(71,85,105,0.08),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset]"
                         type="text"
                         placeholder="请输入账号"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
+                        style={{ WebkitTextFillColor: "#334155" }}
                       />
                     </div>
                   </div>
                   
-                  {/* 密码输入框 */}
+                  {/* 密码输入框 - 轻拟态内凹风格 */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label className="text-slate-700 text-sm font-medium" htmlFor="password">密码</Label>
                       <a href="#" className="text-sm text-blue-500 hover:text-blue-600 font-medium transition-colors duration-200">忘记密码?</a>
                     </div>
                     <div className="relative group/input">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-400 transition-colors duration-200" />
+                      <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none z-10">
+                        <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-500 transition-colors duration-200" />
                       </div>
                       <Input
                         id="password"
-                        className="h-14 rounded-xl pl-11 pr-12 border-2 border-slate-200 bg-white text-slate-800 font-medium placeholder:text-slate-400 focus-visible:ring-0 focus-visible:border-blue-400 focus-visible:shadow-[0_0_0_4px_rgba(96,165,250,0.1)] transition-all duration-200"
+                        className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 pl-12 pr-12 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-200 focus:shadow-[inset_2px_2px_3px_rgba(71,85,105,0.2),inset_6px_6px_16px_rgba(71,85,105,0.08),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset]"
                         type={showPassword ? "text" : "password"}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
+                        style={{ WebkitTextFillColor: "#334155" }}
                       />
                       <button
                         type="button"
                         aria-label={showPassword ? "隐藏密码" : "显示密码"}
                         onClick={() => setShowPassword((v) => !v)}
-                        className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 transition-colors duration-200"
+                        className="absolute inset-y-0 right-0 pr-5 flex items-center text-slate-400 hover:text-slate-600 transition-colors duration-200 z-10"
                       >
                         {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                       </button>
@@ -445,7 +450,7 @@ export default function LoginPage() {
                     <div className="w-full border-t border-slate-200"></div>
                   </div>
                   <div className="relative flex justify-center text-xs">
-                    <span className="px-4 bg-gradient-to-b from-white to-slate-50/80 text-slate-400">或</span>
+                    <span className="px-4 bg-white text-slate-400">或</span>
                   </div>
                 </div>
               </div>
@@ -460,37 +465,78 @@ export default function LoginPage() {
                   </span>
                 </a>
               </div>
-            </Card>
+            </div>
           </div>
         </div>
       </div>
       <style jsx global>{`
+        /* ========== 精致流光边框动画 ========== */
+        
+        /* 悬浮动画 - 上下漂浮效果 */
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0);
+          }
+          50% {
+            transform: translateY(-12px);
+          }
+        }
+        
+        /* 光束旋转动画 - 12秒一圈，柔和自然 */
+        @keyframes spin-soft {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+        
+        /* 应用悬浮动画 */
+        .animate-float {
+          will-change: transform;
+          animation: float 6s ease-in-out infinite;
+        }
+        
+        /* 应用柔和旋转动画 */
+        .animate-spin-soft {
+          will-change: transform;
+          animation: spin-soft 12s linear infinite;
+        }
+        
+        /* hover 时暂停所有动画 - 容器自身和子元素 */
+        .animate-float:hover,
+        .animate-float:focus-within,
+        .group:hover .animate-float,
+        .group:hover .animate-spin-soft,
+        .group:focus-within .animate-float,
+        .group:focus-within .animate-spin-soft {
+          animation-play-state: paused !important;
+        }
+        
+        /* ========== 修复浏览器自动填充样式 ========== */
+        input:-webkit-autofill,
+        input:-webkit-autofill:hover,
+        input:-webkit-autofill:focus,
+        input:-webkit-autofill:active {
+          -webkit-text-fill-color: #334155 !important;
+          transition: background-color 5000s ease-in-out 0s;
+        }
+        
+        /* 强制移除所有输入框的默认 outline */
+        input:focus,
+        input:focus-visible,
+        input:-webkit-autofill:focus {
+          outline: none !important;
+          outline-offset: 0 !important;
+        }
+        
+        /* 兼容旧版 neon 效果（保留备用） */
         @keyframes neon-breathe {
           0% { opacity: .55; filter: blur(6px) saturate(1.1); }
           100% { opacity: .8; filter: blur(10px) saturate(1.25); }
         }
-        @keyframes levitate-glow {
-          0%, 100% {
-            transform: translateY(0);
-            box-shadow: 0 25px 80px -20px rgba(0,0,0,0.12), 0 0 0 1px rgba(255,255,255,0.8) inset;
-            border-color: rgb(241 245 249);
-          }
-          50% {
-            transform: translateY(-12px);
-            box-shadow: 
-              0 40px 100px -20px rgba(59, 130, 246, 0.4),
-              0 0 0 1px rgba(147, 197, 253, 0.5) inset;
-            border-color: rgba(59, 130, 246, 0.3);
-          }
-        }
-        .animate-levitate {
-          will-change: transform, box-shadow;
-          animation: levitate-glow 6s ease-in-out infinite;
-        }
-        .animate-levitate:hover,
-        .animate-levitate:focus-within {
-          animation-play-state: paused;
-        }
+        
         .neon-ring {
           background:
             conic-gradient(
@@ -511,6 +557,7 @@ export default function LoginPage() {
           mask-composite: exclude;
           padding: 2px;
         }
+        
         .neon-soft {
           box-shadow:
             0 0 40px rgba(59,130,246,0.25),
