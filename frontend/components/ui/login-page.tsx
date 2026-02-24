@@ -331,7 +331,7 @@ export default function LoginPage() {
             <div className="absolute -inset-1 rounded-[24px] bg-gradient-to-b from-blue-500/20 via-blue-400/10 to-slate-400/20 blur-xl opacity-60 group-hover:opacity-80 transition-opacity duration-500"></div>
             <div className="absolute -inset-0.5 rounded-[20px] bg-slate-900/5 blur-lg"></div>
             
-            <Card className="relative z-10 bg-gradient-to-b from-white to-slate-50/80 border border-slate-100 shadow-[0_25px_80px_-20px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.8)_inset] rounded-[16px] overflow-hidden transition-all duration-300 hover:shadow-[0_30px_90px_-20px_rgba(0,0,0,0.15)]">
+            <Card className="relative z-10 bg-gradient-to-b from-white to-slate-50/80 border border-slate-100 shadow-[0_25px_80px_-20px_rgba(0,0,0,0.12),0_0_0_1px_rgba(255,255,255,0.8)_inset] rounded-[16px] overflow-hidden transition-all duration-300 hover:shadow-[0_30px_90px_-20px_rgba(0,0,0,0.15)] animate-levitate">
               {/* 顶部装饰线 */}
               <div className="h-1 w-full bg-blue-400"></div>
               
@@ -469,6 +469,28 @@ export default function LoginPage() {
           0% { opacity: .55; filter: blur(6px) saturate(1.1); }
           100% { opacity: .8; filter: blur(10px) saturate(1.25); }
         }
+        @keyframes levitate-glow {
+          0%, 100% {
+            transform: translateY(0);
+            box-shadow: 0 25px 80px -20px rgba(0,0,0,0.12), 0 0 0 1px rgba(255,255,255,0.8) inset;
+            border-color: rgb(241 245 249);
+          }
+          50% {
+            transform: translateY(-12px);
+            box-shadow: 
+              0 40px 100px -20px rgba(59, 130, 246, 0.4),
+              0 0 0 1px rgba(147, 197, 253, 0.5) inset;
+            border-color: rgba(59, 130, 246, 0.3);
+          }
+        }
+        .animate-levitate {
+          will-change: transform, box-shadow;
+          animation: levitate-glow 6s ease-in-out infinite;
+        }
+        .animate-levitate:hover,
+        .animate-levitate:focus-within {
+          animation-play-state: paused;
+        }
         .neon-ring {
           background:
             conic-gradient(
@@ -482,7 +504,6 @@ export default function LoginPage() {
               rgba(34,211,238,0.0) 360deg
             );
           filter: blur(8px) saturate(1.2);
-          /* ring mask */
           -webkit-mask:
             linear-gradient(#000 0 0) content-box,
             linear-gradient(#000 0 0);
@@ -504,4 +525,3 @@ export default function LoginPage() {
     </div>
   )
 }
-
