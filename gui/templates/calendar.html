@@ -288,6 +288,47 @@ Full Calendar
             ]
         });
 
+        /* ================================================
+   滚轮切换日历逻辑 (Mouse Wheel Navigation)
+   ================================================ */
+        var scrollCooldown = false; // 冷却状态标记
+
+        $('#calendar').on('wheel mousewheel DOMMouseScroll', function (e) {
+            // 1. 获取当前视图类型
+            var currentView = $('#calendar').fullCalendar('getView');
+
+            // 2. 冲突检测：如果是周视图或日视图，为了不影响查看时间轴，我们不拦截滚轮
+            // (除非你希望按住Shift键时强制切换，可以加 e.shiftKey 判断)
+            if (currentView.name !== 'month' && !e.shiftKey) {
+                return; // 非月视图，且没按Shift，不拦截
+            }
+// 这样在周视图下，按住 Shift + 滚轮，就可以左右切换周了
+
+            // 3. 阻止页面本身的滚动 (防止日历切换时页面跟着上下跑)
+            e.preventDefault();
+
+            // 4. 节流控制 (Throttling)
+            // 如果处于冷却中，直接忽略这次滚动
+            if (scrollCooldown) return;
+
+            // 5. 判断滚动方向
+            // 兼容不同浏览器的 delta 获取方式
+            var delta = e.originalEvent.wheelDelta || -e.originalEvent.detail || -e.originalEvent.deltaY;
+
+            if (delta > 0) {
+                // 向上滚动 -> 上一个月
+                $('#calendar').fullCalendar('prev');
+            } else {
+                // 向下滚动 -> 下一个月
+                $('#calendar').fullCalendar('next');
+            }
+
+            // 6. 开启冷却 (300ms内不再响应滚动，避免切太快)
+            scrollCooldown = true;
+            setTimeout(function () {
+                scrollCooldown = false;
+            }, 300); // 你可以调整这个数值：200ms感觉更快，500ms感觉更稳
+        });
     });
 
 
