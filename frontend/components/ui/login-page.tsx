@@ -358,11 +358,11 @@ export default function LoginPage() {
                     <Label className="text-slate-700 text-sm font-medium" htmlFor="username">账号</Label>
                     <div className="relative group/input">
                       <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none z-10">
-                        <User className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-500 transition-colors duration-200" />
+                        <User className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-600 transition-colors duration-200" />
                       </div>
                       <Input
                         id="username"
-                        className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 pl-12 pr-5 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-200 focus:shadow-[inset_2px_2px_3px_rgba(71,85,105,0.2),inset_6px_6px_16px_rgba(71,85,105,0.08),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset]"
+                        className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 focus-visible:ring-0 focus-visible:outline-none focus-visible:border-0 pl-12 pr-5 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-400 ease-out focus:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus-visible:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus:text-blue-600 focus-visible:text-blue-600"
                         type="text"
                         placeholder="请输入账号"
                         value={email}
@@ -381,11 +381,11 @@ export default function LoginPage() {
                     </div>
                     <div className="relative group/input">
                       <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none z-10">
-                        <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-500 transition-colors duration-200" />
+                        <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-600 transition-colors duration-200" />
                       </div>
                       <Input
                         id="password"
-                        className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 pl-12 pr-12 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-200 focus:shadow-[inset_2px_2px_3px_rgba(71,85,105,0.2),inset_6px_6px_16px_rgba(71,85,105,0.08),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset]"
+                        className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 focus-visible:ring-0 focus-visible:outline-none focus-visible:border-0 pl-12 pr-12 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-400 ease-out focus:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus-visible:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus:text-blue-600 focus-visible:text-blue-600"
                         type={showPassword ? "text" : "password"}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -396,7 +396,7 @@ export default function LoginPage() {
                         type="button"
                         aria-label={showPassword ? "隐藏密码" : "显示密码"}
                         onClick={() => setShowPassword((v) => !v)}
-                        className="absolute inset-y-0 right-0 pr-5 flex items-center text-slate-400 hover:text-slate-600 transition-colors duration-200 z-10"
+                        className="absolute inset-y-0 right-0 pr-5 flex items-center text-slate-400 group-focus-within/input:text-blue-600 hover:text-slate-600 transition-colors duration-200 z-10"
                       >
                         {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                       </button>
