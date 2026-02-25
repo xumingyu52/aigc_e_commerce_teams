@@ -1,6 +1,8 @@
 #入口文件main
 import sys
 import os
+import subprocess
+import atexit
 # --- 加载 .env 文件开始 ---
 def load_env_file():
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
@@ -79,6 +81,45 @@ def replace_ip_in_file(file_path, new_ip):
         file.write(content)
 
 
+def start_frontend():
+    """自动启动 Next.js 前端开发服务器"""
+    frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend')
+    
+    # 检查 frontend 目录是否存在
+    if not os.path.exists(frontend_dir):
+        print(">>> frontend 目录不存在，跳过启动前端")
+        return None
+    
+    # 检查 node_modules 是否存在
+    if not os.path.exists(os.path.join(frontend_dir, 'node_modules')):
+        print(">>> 警告: frontend/node_modules 不存在，请先运行 npm install")
+        return None
+    
+    # 启动 npm run dev
+    print(">>> 正在启动 frontend (npm run dev)...")
+    
+    # Windows 使用 shell=True
+    process = subprocess.Popen(
+        'npm run dev',
+        cwd=frontend_dir,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    
+    print(f">>> Frontend 已启动，PID: {process.pid}")
+    return process
+
+
+def stop_frontend(process):
+    """关闭 frontend 进程"""
+    if process:
+        print(">>> 正在关闭 frontend...")
+        process.terminate()
+        process.wait()
+        print(">>> Frontend 已关闭")
+
+
 if __name__ == '__main__':
     __clear_samples()
     __clear_logs()
@@ -102,6 +143,15 @@ if __name__ == '__main__':
         if config_util.ASR_mode == "ali":
             ali_nls.start()
     # --- 关键修改结束 ---
+
+    # 启动 frontend (Next.js 开发服务器)
+    frontend_process = None
+    try:
+        frontend_process = start_frontend()
+        if frontend_process:
+            atexit.register(lambda: stop_frontend(frontend_process))
+    except Exception as e:
+        print(f">>> 启动 frontend 失败: {e}")
 
     # 启动http服务器
     try:
