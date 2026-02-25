@@ -53,33 +53,21 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      // 简单本地验证
-      if (email === 'zxhy' && password === '12345678') {
-        // 调用Flask后端API
-        // 使用相对路径，通过Next.js代理转发
-        const response = await fetch('/api/login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ email, password }),
-        })
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      })
 
-        if (response.ok) {
-          const data = await response.json();
-          if (data.status === 'success') {
-             // 登录成功后跳转到主页，动态获取主机名
-             const targetHost = window.location.hostname;
-             window.location.href = `http://${targetHost}:5000/home`
-          } else {
-             alert(data.message || '登录失败')
-          }
-        } else {
-           // 处理非200响应
-           alert(`登录请求失败: ${response.status}`)
-        }
+      const data = await response.json().catch(() => ({}))
+
+      if (response.ok && (data?.status === 'success')) {
+        const targetHost = window.location.hostname
+        window.location.href = `http://${targetHost}:5000/home`
       } else {
-        alert('账号或密码错误')
+        alert((data && data.message) ? data.message : `登录请求失败: ${response.status}`)
       }
     } catch (error) {
       console.error('登录失败:', error)
@@ -248,12 +236,19 @@ export default function LoginPage() {
                 </Button>
               </CardFooter>
             </form>
-            <div className="px-8 pb-6 text-right text-sm text-blue-200 mr-[104px]">
-              还没有账号?{" "}
-              <a href="#" className="text-blue-300 hover:text-blue-400 hover:underline">
-                注册
-              </a>
-            </div>
+              <div className="px-8 pb-6 text-right text-sm text-blue-200 mr-[104px]">
+                还没有账号?{" "}
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    router.push("/register")
+                  }}
+                  className="text-blue-300 hover:text-blue-400 hover:underline"
+                >
+                  注册
+                </a>
+              </div>
           </div>
 
         </Card>
@@ -457,7 +452,14 @@ export default function LoginPage() {
               
               {/* 注册链接 */}
               <div className="px-8 pb-8 text-center">
-                <a href="#" className="group/link inline-flex items-center gap-2 text-sm text-slate-600 hover:text-blue-500 font-medium transition-all duration-200">
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    router.push("/register")
+                  }}
+                  className="group/link inline-flex items-center gap-2 text-sm text-slate-600 hover:text-blue-500 font-medium transition-all duration-200"
+                >
                   还没有账号?
                   <span className="text-blue-500 group-hover/link:text-blue-600 inline-flex items-center gap-1">
                     立即注册
