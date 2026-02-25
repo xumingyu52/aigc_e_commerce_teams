@@ -301,21 +301,21 @@ export default function LoginPage() {
                 <div className="text-slate-700 font-medium leading-7 text-[15px]">
                   智创电商营销系统，集成内容生产、投放分发、数据看板与智能分析，助力商家实现全链路增长。
                 </div>
-                <div className="mt-6 grid grid-cols-2 gap-3 text-[13px]">
-                  <div className="group rounded-xl border border-white/60 bg-white/40 backdrop-blur-md px-3 py-2.5 text-slate-700 font-medium shadow-[0_2px_8px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] flex items-center gap-2 hover:bg-white/50 hover:shadow-[0_4px_12px_rgba(59,130,246,0.15)] hover:border-blue-300/70 transition-all duration-300" style={{ transform: 'translateZ(30px)' }}>
-                    <Sparkles className="w-4 h-4 text-blue-600" />
+                <div className="mt-8 grid grid-cols-2 gap-3 text-[13px]">
+                  <div className="group flex items-center gap-3 rounded-2xl p-4 bg-white/50 backdrop-blur-md border-2 border-white/80 shadow-sm text-slate-700 font-medium transition-all duration-300 hover:bg-white/70 hover:scale-[1.02] hover:shadow-md hover:border-white" style={{ transform: 'translateZ(30px)' }}>
+                    <Sparkles className="w-5 h-5 text-blue-600/90" />
                     <span>AI文案/图片生成</span>
                   </div>
-                  <div className="group rounded-xl border border-white/60 bg-white/40 backdrop-blur-md px-3 py-2.5 text-slate-700 font-medium shadow-[0_2px_8px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] flex items-center gap-2 hover:bg-white/50 hover:shadow-[0_4px_12px_rgba(99,102,241,0.15)] hover:border-indigo-300/70 transition-all duration-300" style={{ transform: 'translateZ(30px)' }}>
-                    <BarChart3 className="w-4 h-4 text-indigo-600" />
+                  <div className="group flex items-center gap-3 rounded-2xl p-4 bg-white/50 backdrop-blur-md border-2 border-white/80 shadow-sm text-slate-700 font-medium transition-all duration-300 hover:bg-white/70 hover:scale-[1.02] hover:shadow-md hover:border-white" style={{ transform: 'translateZ(30px)' }}>
+                    <BarChart3 className="w-5 h-5 text-indigo-600/90" />
                     <span>商品看板与洞察</span>
                   </div>
-                  <div className="group rounded-xl border border-white/60 bg-white/40 backdrop-blur-md px-3 py-2.5 text-slate-700 font-medium shadow-[0_2px_8px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] flex items-center gap-2 hover:bg-white/50 hover:shadow-[0_4px_12px_rgba(6,182,212,0.15)] hover:border-cyan-300/70 transition-all duration-300" style={{ transform: 'translateZ(30px)' }}>
-                    <Share2 className="w-4 h-4 text-cyan-600" />
+                  <div className="group flex items-center gap-3 rounded-2xl p-4 bg-white/50 backdrop-blur-md border-2 border-white/80 shadow-sm text-slate-700 font-medium transition-all duration-300 hover:bg-white/70 hover:scale-[1.02] hover:shadow-md hover:border-white" style={{ transform: 'translateZ(30px)' }}>
+                    <Share2 className="w-5 h-5 text-cyan-600/90" />
                     <span>多渠道投放管理</span>
                   </div>
-                  <div className="group rounded-xl border border-white/60 bg-white/40 backdrop-blur-md px-3 py-2.5 text-slate-700 font-medium shadow-[0_2px_8px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.8)] flex items-center gap-2 hover:bg-white/50 hover:shadow-[0_4px_12px_rgba(139,92,246,0.15)] hover:border-violet-300/70 transition-all duration-300" style={{ transform: 'translateZ(30px)' }}>
-                    <Video className="w-4 h-4 text-violet-600" />
+                  <div className="group flex items-center gap-3 rounded-2xl p-4 bg-white/50 backdrop-blur-md border-2 border-white/80 shadow-sm text-slate-700 font-medium transition-all duration-300 hover:bg-white/70 hover:scale-[1.02] hover:shadow-md hover:border-white" style={{ transform: 'translateZ(30px)' }}>
+                    <Video className="w-5 h-5 text-violet-600/90" />
                     <span>数字人直播互动</span>
                   </div>
                 </div>
