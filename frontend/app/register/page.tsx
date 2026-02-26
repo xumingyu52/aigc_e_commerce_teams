@@ -6,7 +6,7 @@
  import { Label } from "@/components/ui/label"
  import { Input } from "@/components/ui/input"
  import { Button } from "@/components/ui/button"
- import { Eye, EyeOff } from "lucide-react"
+ import { Eye, EyeOff, User, Lock } from "lucide-react"
 import ParticlesBackground from "@/components/ui/particles-background"
  
  export default function RegisterPage() {
@@ -72,58 +72,75 @@ import ParticlesBackground from "@/components/ui/particles-background"
            </div>
          </CardHeader>
          <form onSubmit={onSubmit}>
-          <CardContent className="relative z-10 px-8 py-4">
-             <div className="space-y-1.5">
-               <Label htmlFor="username" className="text-slate-700 text-sm">账号</Label>
-               <Input
-                 id="username"
-                 value={username}
-                 onChange={(e) => setUsername(e.target.value)}
-                 className="h-11 rounded-xl px-4 border border-white/60 bg-white/70 backdrop-blur-sm placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-400/60 transition-all text-sm"
-                 placeholder="请输入账号"
-               />
+          <CardContent className="relative z-10 px-8 py-4 space-y-5">
+             {/* 账号输入框 - 轻拟态内凹风格 */}
+             <div className="space-y-2">
+               <Label htmlFor="username" className="text-slate-700 text-sm font-medium">账号</Label>
+               <div className="relative group/input">
+                 <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none z-10">
+                   <User className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-600 transition-colors duration-200" />
+                 </div>
+                 <Input
+                   id="username"
+                   value={username}
+                   onChange={(e) => setUsername(e.target.value)}
+                   className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 focus-visible:ring-0 focus-visible:outline-none focus-visible:border-0 pl-12 pr-5 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-400 ease-out focus:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus-visible:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus:text-blue-600 focus-visible:text-blue-600"
+                   placeholder="请输入账号"
+                   style={{ WebkitTextFillColor: "#334155" }}
+                 />
+               </div>
              </div>
-             <div className="space-y-1.5 mt-4">
-               <Label htmlFor="password" className="text-slate-700 text-sm">密码</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPwd ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                   className="h-11 rounded-xl px-4 pr-10 border border-white/60 bg-white/70 backdrop-blur-sm placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-400/60 transition-all text-sm"
-                  placeholder="请输入密码"
-                />
-                <button
-                  type="button"
-                  aria-label={showPwd ? "隐藏密码" : "显示密码"}
-                  onClick={() => setShowPwd((v) => !v)}
-                  className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
-                >
-                  {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+             {/* 密码输入框 - 轻拟态内凹风格 */}
+             <div className="space-y-2">
+               <Label htmlFor="password" className="text-slate-700 text-sm font-medium">密码</Label>
+               <div className="relative group/input">
+                 <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none z-10">
+                   <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-600 transition-colors duration-200" />
+                 </div>
+                 <Input
+                   id="password"
+                   type={showPwd ? "text" : "password"}
+                   value={password}
+                   onChange={(e) => setPassword(e.target.value)}
+                   className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 focus-visible:ring-0 focus-visible:outline-none focus-visible:border-0 pl-12 pr-12 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-400 ease-out focus:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus-visible:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus:text-blue-600 focus-visible:text-blue-600"
+                   placeholder="请输入密码"
+                   style={{ WebkitTextFillColor: "#334155" }}
+                 />
+                 <button
+                   type="button"
+                   aria-label={showPwd ? "隐藏密码" : "显示密码"}
+                   onClick={() => setShowPwd((v) => !v)}
+                   className="absolute inset-y-0 right-0 pr-5 flex items-center text-slate-400 group-focus-within/input:text-blue-600 hover:text-slate-600 transition-colors duration-200 z-10"
+                 >
+                   {showPwd ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
-              </div>
+               </div>
              </div>
-             <div className="space-y-1.5 mt-4">
-               <Label htmlFor="confirm" className="text-slate-700 text-sm">确认密码</Label>
-              <div className="relative">
-                <Input
-                  id="confirm"
-                  type={showConfirm ? "text" : "password"}
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                   className="h-11 rounded-xl px-4 pr-10 border border-white/60 bg-white/70 backdrop-blur-sm placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-400/60 transition-all text-sm"
-                  placeholder="请再次输入密码"
-                />
-                <button
-                  type="button"
-                  aria-label={showConfirm ? "隐藏密码" : "显示密码"}
-                  onClick={() => setShowConfirm((v) => !v)}
-                  className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
-                >
-                  {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+             {/* 确认密码输入框 - 轻拟态内凹风格 */}
+             <div className="space-y-2">
+               <Label htmlFor="confirm" className="text-slate-700 text-sm font-medium">确认密码</Label>
+               <div className="relative group/input">
+                 <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none z-10">
+                   <Lock className="h-5 w-5 text-slate-400 group-focus-within/input:text-blue-600 transition-colors duration-200" />
+                 </div>
+                 <Input
+                   id="confirm"
+                   type={showConfirm ? "text" : "password"}
+                   value={confirm}
+                   onChange={(e) => setConfirm(e.target.value)}
+                   className="w-full h-14 rounded-2xl border-0 outline-none ring-0 focus:ring-0 focus:outline-none focus:border-0 focus-visible:ring-0 focus-visible:outline-none focus-visible:border-0 pl-12 pr-12 font-medium text-slate-700 placeholder:text-slate-400 bg-[#EFF4F9] shadow-[inset_2px_2px_3px_rgba(71,85,105,0.12),inset_6px_6px_12px_rgba(71,85,105,0.04),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] transition-all duration-400 ease-out focus:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus-visible:shadow-[inset_0px_0px_8px_rgba(59,130,246,0.3),inset_0px_0px_24px_rgba(59,130,246,0.12),inset_-3px_-3px_8px_rgba(255,255,255,1),0_0_0_1000px_#EFF4F9_inset] focus:text-blue-600 focus-visible:text-blue-600"
+                   placeholder="请再次输入密码"
+                   style={{ WebkitTextFillColor: "#334155" }}
+                 />
+                 <button
+                   type="button"
+                   aria-label={showConfirm ? "隐藏密码" : "显示密码"}
+                   onClick={() => setShowConfirm((v) => !v)}
+                   className="absolute inset-y-0 right-0 pr-5 flex items-center text-slate-400 group-focus-within/input:text-blue-600 hover:text-slate-600 transition-colors duration-200 z-10"
+                 >
+                   {showConfirm ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                 </button>
+               </div>
              </div>
           </CardContent>
           <CardFooter className="relative z-10 px-8 pb-6 pt-2">
