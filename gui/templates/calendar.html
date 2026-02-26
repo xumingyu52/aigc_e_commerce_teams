@@ -202,6 +202,18 @@ Full Calendar
 
     $(document).ready(function () {
 
+        // 日历切换方向记录变量
+        var calendarSwitchDirection = 'none'; // 'prev', 'next', 'none'
+        var previousViewName = '';
+
+        /* 更新日历导航按钮的提示文本
+        ---------------------------------------------------------------*/
+        function updateNavButtonsTooltip(viewName) {
+            var tooltipText = (viewName === 'month')
+                ? '滑动滚轮快速切换'
+                : '按住shift滑动滚轮快速切换';
+            $('.fc-prev-button, .fc-next-button').attr('title', tooltipText);
+        }
 
         /* initialize the external events
 				-----------------------------------------------------------------*/
@@ -231,10 +243,53 @@ Full Calendar
                 center: 'title',
                 right: 'month,basicWeek,basicDay'
             },
+            buttonText: {
+                today: '今天',
+                month: '月',
+                week: '周',
+                day: '日'
+            },
+            monthNames: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'],
+            monthNamesShort: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+            dayNames: ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'],
+            dayNamesShort: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
             defaultDate: '2025-4-8',
             editable: true,
             droppable: true, // this allows things to be dropped onto the calendar
             eventLimit: true, // allow "more" link when too many events
+            // 视图渲染时更新导航按钮提示并执行动画
+            viewRender: function(view, element) {
+                updateNavButtonsTooltip(view.name);
+
+                // 判断是否为视图类型切换（月/周/日）
+                var isViewTypeChanged = previousViewName !== '' && previousViewName !== view.name;
+                previousViewName = view.name;
+
+                // 获取日历内容区域
+                var $calendarContent = $('#calendar').find('.fc-view-container');
+
+                // 延迟淡入效果：先保持透明，给用户眼睛缓冲时间
+                $calendarContent.css({
+                    'opacity': 0,
+                    'transform': 'scale(0.96)',
+                    'transition': 'none'
+                });
+
+                // 强制重绘
+                $calendarContent[0].offsetHeight;
+
+                // 延迟 80ms 后开始淡入，动画持续 0.5s
+                setTimeout(function() {
+                    $calendarContent.css({
+                        'opacity': 1,
+                        'transform': 'scale(1)',
+                        'transition': 'all 0.5s ease-out'
+                    });
+                }, 80);
+
+                // 重置方向
+                calendarSwitchDirection = 'none';
+            },
             events: [
                 {
                     title: '重要事件',
@@ -289,6 +344,19 @@ Full Calendar
         });
 
         /* ================================================
+   按钮点击切换方向记录
+   ================================================ */
+        // 监听 prev 按钮点击
+        $(document).on('click', '.fc-prev-button', function() {
+            calendarSwitchDirection = 'prev';
+        });
+
+        // 监听 next 按钮点击
+        $(document).on('click', '.fc-next-button', function() {
+            calendarSwitchDirection = 'next';
+        });
+
+        /* ================================================
    滚轮切换日历逻辑 (Mouse Wheel Navigation)
    ================================================ */
         var scrollCooldown = false; // 冷却状态标记
@@ -317,9 +385,11 @@ Full Calendar
 
             if (delta > 0) {
                 // 向上滚动 -> 上一个月
+                calendarSwitchDirection = 'prev';
                 $('#calendar').fullCalendar('prev');
             } else {
                 // 向下滚动 -> 下一个月
+                calendarSwitchDirection = 'next';
                 $('#calendar').fullCalendar('next');
             }
 
