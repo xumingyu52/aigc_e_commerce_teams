@@ -4,6 +4,46 @@ import { useEffect, useRef } from "react"
 import Script from "next/script"
 import loginBg from '../../../gui/static/images/bg2.jpg';
 
+type ParticlesConfig = {
+  particles: {
+    number: {
+      value: number
+      density: { enable: boolean }
+    }
+    color: { value: string[] }
+    shape: { type: string }
+    opacity: {
+      value: number
+      random: boolean
+    }
+    size: {
+      value: number
+      random: { min: number; max: number }
+    }
+    line_linked: {
+      distance: number
+      color: string
+      opacity: number
+      width: number
+    }
+    move: {
+      enable: boolean
+      speed: number
+      direction: string
+      out_mode: string
+    }
+  }
+  interactivity: {
+    detect_on: string
+    events: {
+      onhover: {
+        enable: boolean
+        mode: string
+      }
+    }
+  }
+}
+
 export default function ParticlesBackground() {
   const containerRef = useRef<HTMLDivElement>(null)
   const isInitialized = useRef(false)
@@ -18,7 +58,7 @@ export default function ParticlesBackground() {
     
     isInitialized.current = true
     
-    const config = {
+    const config: ParticlesConfig = {
       particles: {
         number: { 
           value: Math.floor(window.innerWidth / 15),
@@ -111,7 +151,7 @@ export default function ParticlesBackground() {
           }
           if (containerRef.current && window.particlesJS && !isInitialized.current) {
             isInitialized.current = true
-            const config = {
+            const config: ParticlesConfig = {
               particles: {
                 number: { 
                   value: Math.floor(window.innerWidth / 15),
@@ -170,7 +210,7 @@ export default function ParticlesBackground() {
 // TypeScript 类型声明
 declare global {
   interface Window {
-    particlesJS: (tag_id: string, params: any) => void
+    particlesJS: (tag_id: string, params: ParticlesConfig) => void
     pJSDom: Array<{
       pJS: {
         fn: {
