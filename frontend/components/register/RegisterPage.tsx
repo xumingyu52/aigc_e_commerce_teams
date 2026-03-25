@@ -66,6 +66,7 @@ export default function RegisterPage() {
           </div>
           <CardHeader className="relative z-10 px-8 pt-10 pb-4">
             <div className="flex flex-col items-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={logoUrl} alt="智行合一" className="h-[100px] md:h-[120px] w-auto object-contain" />
               <CardTitle className="mt-1 text-xl font-bold text-slate-800 text-center">注册账号</CardTitle>
             </div>
