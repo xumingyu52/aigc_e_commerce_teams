@@ -8,6 +8,19 @@ import NeonStrips, { useNeonState } from '../components/widgets/NeonStrips';
 let PIXI: typeof import('pixi.js') | null = null;
 let Live2DModel: typeof import('pixi-live2d-display/cubism4').Live2DModel | null = null;
 
+type CubismWindow = Window & {
+  Live2DCubismCore?: unknown;
+};
+
+type Live2DModelWithTicker = typeof import('pixi-live2d-display/cubism4').Live2DModel & {
+  registerTicker: (ticker: typeof import('pixi.js').Ticker) => void;
+};
+
+type InteractiveLive2DModel = import('pixi-live2d-display/cubism4').Live2DModel & {
+  on: (event: 'hit', handler: (hitAreas: string[]) => void) => void;
+  motion: (name: string) => void;
+};
+
 const EcommerceLive: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<'chat' | 'product'>('chat');
@@ -30,13 +43,13 @@ const EcommerceLive: React.FC = () => {
         return;
       }
       // 检查 Cubism 运行时是否已加载
-      if ((window as any).Live2DCubismCore) {
+      if ((window as CubismWindow).Live2DCubismCore) {
         resolve();
         return;
       }
       // 等待脚本加载
       const checkInterval = setInterval(() => {
-        if ((window as any).Live2DCubismCore) {
+        if ((window as CubismWindow).Live2DCubismCore) {
           clearInterval(checkInterval);
           resolve();
         }
@@ -74,7 +87,7 @@ const EcommerceLive: React.FC = () => {
         }
 
         // 注册 Live2D ticker
-        (Live2DModel as any).registerTicker(PIXI.Ticker);
+        (Live2DModel as Live2DModelWithTicker).registerTicker(PIXI.Ticker);
 
         // 获取容器尺寸
         const containerWidth = container.offsetWidth;
@@ -126,8 +139,7 @@ const EcommerceLive: React.FC = () => {
         model = await Live2DModel.from(modelUrl);
         console.log('Model loaded:', model);
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        app.stage.addChild(model as any);
+        app.stage.addChild(model);
 
         // 计算缩放比例 - 放大30%，偏左放置
         const scaleX = (containerWidth * 0.9) / model.width;
@@ -147,11 +159,9 @@ const EcommerceLive: React.FC = () => {
         console.log('Canvas size:', canvas.width, canvas.height);
 
         // 添加交互
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (model as any).on('hit', (hitAreas: string[]) => {
+        (model as InteractiveLive2DModel).on('hit', (hitAreas: string[]) => {
           if (hitAreas.includes('body')) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (model as any).motion('TapBody');
+            (model as InteractiveLive2DModel).motion('TapBody');
           }
         });
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import * as PIXI from 'pixi.js';
 import { Live2DModel as PixiLive2DModel, MotionPriority } from 'pixi-live2d-display/cubism4';
 
@@ -13,6 +13,24 @@ interface Live2DModelProps {
   yOffset?: number;
   onLoad?: () => void;
 }
+
+type CoreModelController = {
+  setParameterValueById: (id: string, value: number) => void;
+};
+
+type MotionManager = {
+  startRandomMotion: (group: string, priority: MotionPriority) => void;
+};
+
+type InternalModel = {
+  coreModel?: CoreModelController;
+  motionManager?: MotionManager;
+};
+
+type StageReadyModel = PixiLive2DModel & {
+  eventMode?: string;
+  internalModel?: InternalModel;
+};
 
 // 眼神跟随鼠标算法
 const calculateEyeTracking = (
@@ -63,6 +81,25 @@ export const Live2DModel: React.FC<Live2DModelProps> = ({
   const targetRef = useRef({ eyeX: 0, eyeY: 0, headAngleX: 0, headAngleY: 0 });
   const currentRef = useRef({ eyeX: 0, eyeY: 0, headAngleX: 0, headAngleY: 0 });
 
+  // 更新位置和缩放 - 半身特写构图（再放大30%）
+  const updateTransform = useCallback(() => {
+    const model = modelRef.current;
+    if (!model) return;
+
+    const baseScale = Math.min(
+      (width * 1.2) / model.width,
+      (height * 1.5) / model.height
+    );
+    const initialScale = baseScale * scale * 2.3;
+
+    model.scale.set(initialScale);
+
+    const xPosition = width * 0.42 + xOffset;
+    const yPosition = height * 0.68 + yOffset;
+
+    model.position.set(xPosition, yPosition);
+  }, [height, scale, width, xOffset, yOffset]);
+
   // 加载模型
   useEffect(() => {
     console.log("Live2DModel useEffect triggered, app:", app, "modelSrc:", modelSrc);
@@ -87,17 +124,16 @@ export const Live2DModel: React.FC<Live2DModelProps> = ({
 
         if (app && app.stage) {
           console.log("Adding model to stage");
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          app.stage.addChild(model as any);
-          modelRef.current = model;
+          const stageModel = model as StageReadyModel;
+          app.stage.addChild(stageModel);
+          modelRef.current = stageModel;
 
           // 设置基础配置
-          model.anchor.set(0.5, 0.5);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (model as any).eventMode = 'static';
+          stageModel.anchor.set(0.5, 0.5);
+          stageModel.eventMode = 'static';
 
           // 初始动作
-          const internalModel = model.internalModel as any;
+          const internalModel = stageModel.internalModel;
           if (internalModel?.motionManager) {
             internalModel.motionManager.startRandomMotion('Idle', MotionPriority.IDLE);
           }
@@ -158,7 +194,7 @@ export const Live2DModel: React.FC<Live2DModelProps> = ({
         currentRef.current.headAngleY += (target.headAngleY - currentRef.current.headAngleY) * lerpFactor;
 
         // 应用到模型参数
-        const coreModel = (model.internalModel as any)?.coreModel;
+        const coreModel = (model as StageReadyModel).internalModel?.coreModel;
         if (coreModel) {
           // 眼球移动
           coreModel.setParameterValueById('ParamEyeBallX', currentRef.current.eyeX);
@@ -186,51 +222,23 @@ export const Live2DModel: React.FC<Live2DModelProps> = ({
       cancelAnimationFrame(animationId);
       canvas.removeEventListener('mousemove', handleMouseMove);
       if (modelRef.current) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if (app && app.stage && app.stage.children.includes(modelRef.current as any)) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          app.stage.removeChild(modelRef.current as any);
+        if (app && app.stage && app.stage.children.includes(modelRef.current)) {
+          app.stage.removeChild(modelRef.current);
         }
         modelRef.current.destroy();
         modelRef.current = null;
       }
     };
-  }, [app, modelSrc, width, height, xOffset, yOffset]);
-
-  // 更新位置和缩放 - 半身特写构图（再放大30%）
-  const updateTransform = () => {
-    const model = modelRef.current;
-    if (!model) return;
-
-    // 半身特写：放大 2.3 倍（原1.8倍 + 30%），聚焦上半身
-    const baseScale = Math.min(
-      (width * 1.2) / model.width,
-      (height * 1.5) / model.height
-    );
-    const initialScale = baseScale * scale * 2.3; // 额外放大 2.3 倍
-
-    model.scale.set(initialScale);
-    
-    // 向左偏移，右侧留出空间展示弹幕/产品
-    const xPosition = width * 0.42 + xOffset; // 从 0.5 改为 0.42，偏左放置
-    
-    // 垂直位置调整
-    const yPosition = height * 0.68 + yOffset; // 稍微向下调整
-    
-    model.position.set(
-      xPosition,
-      yPosition
-    );
-  };
+  }, [app, modelSrc, onLoad, updateTransform, width, height, xOffset, yOffset]);
 
   useEffect(() => {
     updateTransform();
-  }, [width, height, scale, xOffset, yOffset]);
+  }, [updateTransform]);
 
   // 更新嘴巴开口度
   useEffect(() => {
-    if (modelRef.current?.internalModel) {
-      const coreModel = (modelRef.current.internalModel as any).coreModel;
+    if (modelRef.current) {
+      const coreModel = (modelRef.current as StageReadyModel).internalModel?.coreModel;
       if (coreModel) {
         coreModel.setParameterValueById('ParamMouthOpenY', mouthOpenSize);
       }
