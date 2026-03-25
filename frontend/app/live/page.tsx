@@ -18,9 +18,12 @@ export default function LivePage() {
     { user: '用户_K7', message: '主播能介绍下这款耳机吗？', level: 'UL12', color: '#00aeec' },
     { user: '小海豹', message: '这个耳机音质怎么样？', level: 'UL8', color: '#fb7299' },
     { user: '科技迷', message: '已下单，期待发货！', level: 'UL15', color: '#52c41a' },
-    {user:"kk",nmessage:'主播好可爱!!!!',level: 'UL15', color: '#52c41a'}
+    {user:'kk',message:'主播好可爱!!!!',level: 'UL15', color: '#52c41a'}
   ])
   const [inputMessage, setInputMessage] = useState('')
+  const [isRecording, setIsRecording] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   // 霓虹灯带状态管理
   const { state: neonState, audioLevel, setState: setNeonState, setAudioLevel } = useNeonState()
@@ -193,6 +196,125 @@ export default function LivePage() {
     setInputMessage('')
   }
 
+  // 语音相关功能
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
+      audioChunksRef.current = []
+      
+      mediaRecorder.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data)
+      }
+      
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
+        setIsRecording(false)
+        
+        // 发送到 ASR 接口识别
+        await sendAudioToASR(audioBlob)
+        
+        // 停止录音
+        stream.getTracks().forEach(track => track.stop())
+      }
+      
+      mediaRecorder.start()
+      setIsRecording(true)
+    } catch (error) {
+      console.error('录音失败:', error)
+      alert('无法访问麦克风，请检查浏览器权限设置')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+    }
+  }
+
+  const sendAudioToASR = async (audioBlob: Blob) => {
+    try {
+      const formData = new FormData()
+      formData.append('audio', audioBlob, 'recording.wav')
+      
+      const response = await fetch('/api/live/asr', {
+        method: 'POST',
+        body: formData
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        const recognizedText = result.text
+        
+        if (recognizedText) {
+          // 显示识别结果
+          setChatMessages(prev => [...prev, {
+            user: '我',
+            message: recognizedText,
+            level: 'UL5',
+            color: '#00aeec'
+          }])
+          
+          // 触发 AI 回复
+          await triggerAIReply(recognizedText)
+        }
+      } else {
+        console.error('ASR 识别失败')
+        alert('语音识别失败，请重试')
+      }
+    } catch (error) {
+      console.error('发送音频失败:', error)
+      alert('语音识别出错，请重试')
+    }
+  }
+
+  const triggerAIReply = async (text: string) => {
+    try {
+      const response = await fetch('/api/live/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          username: 'User'
+        })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        const reply = result.reply
+        
+        // 显示 AI 回复
+        setChatMessages(prev => [...prev, {
+          user: '桃瀬 Seal',
+          message: reply,
+          level: 'HOST',
+          color: '#fb7299'
+        }])
+        
+        // 播放 TTS 音频
+        if (result.audio_base64) {
+          const audio = new Audio(`data:audio/wav;base64,${result.audio_base64}`)
+          audio.play()
+          
+          // 更新灯带状态
+          setNeonState('speaking')
+          const interval = setInterval(() => {
+            setAudioLevel(Math.random() * 60 + 20)
+          }, 100)
+          
+          audio.onended = () => {
+            clearInterval(interval)
+            setNeonState('idle')
+            setAudioLevel(0)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('获取回复失败:', error)
+    }
+  }
+
   return (
     <div className="ecommerce-live">
       <header className="header">
@@ -219,7 +341,7 @@ export default function LivePage() {
           <div className="host-info">
             <div className="avatar"></div>
             <div className="host-details">
-              <div className="host-name">白夕Seal (AI Agent)</div>
+              <div className="host-name">桃瀬Seal (AI Agent)</div>
               <div className="host-topic">正在为你讲解：智能数码新品</div>
             </div>
             <div className="live-status">● LIVE 03:24</div>
@@ -309,6 +431,23 @@ export default function LivePage() {
                 ))}
               </div>
               <div className="input-bar">
+                <button
+                  className={`voice-btn ${isRecording ? 'recording' : ''}`}
+                  onMouseDown={startRecording}
+                  onMouseUp={stopRecording}
+                  onMouseLeave={stopRecording}
+                  onTouchStart={startRecording}
+                  onTouchEnd={stopRecording}
+                  title="按住说话"
+                  type="button"
+                >
+                  <svg className="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                </button>
                 <input
                   type="text"
                   placeholder="输入消息参与互动..."
@@ -316,7 +455,7 @@ export default function LivePage() {
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                 />
-                <button onClick={handleSendMessage}>发送</button>
+                <button onClick={handleSendMessage} className="send-btn">发送</button>
               </div>
             </>
           ) : (

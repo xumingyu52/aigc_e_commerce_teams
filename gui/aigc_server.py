@@ -2,18 +2,11 @@ import os
 import sys
 from dotenv import load_dotenv
 from flask import redirect, url_for
-import signal
-import atexit
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-import threading
-import sqlite3
+from datetime import datetime
 from flask_caching import Cache
-import zlib
-import io
 from collections import defaultdict
-import logging
 
 # 加载 .env 文件
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -36,8 +29,7 @@ from utils import config_util
 #  导入标准库和第三方库 ---
 from flask import Flask, request, jsonify, send_from_directory, render_template, redirect, url_for, Response, stream_with_context, session, make_response, after_this_request
 from flask_cors import CORS
-from openai import OpenAI
-from gevent import pywsgi
+from gevent import pywsgi  #提升文件加载的流畅度，防止“排队等待” ，不然live2d可以是一个头一个脚加载出来
 from tts import tts_voice
 from tts import qwen3
 from tts import volcano_tts
@@ -53,37 +45,33 @@ from urllib.parse import urlparse, unquote, urlencode
 from pathlib import PurePosixPath, Path
 import requests
 from dashscope import ImageSynthesis
-import dashscope
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 import hmac
-from hashlib import sha1
 import base64
-import uuid
+import uuid   #随机生成库
 import time
 import hashlib
-import urllib.parse
 import json
 import traceback
 from threading import Lock, Thread
 from datetime import datetime
 import oss2
 import redis
-import random
 from gui.platforms import PLATFORM_CONFIG, COST_CONFIG
 
 #初始化Flask并配置一些基本设置
-app = Flask(__name__, static_url_path='/static')  #指定静态文件的URL路径为/static
-app.secret_key = '8888'  # 设置密钥
+app = Flask(__name__, static_url_path='/static')  #指定静态文件的URL路径为/static,图片等的路径
+app.secret_key=str(uuid.uuid4())  # 生成随机密钥
 app.config['TEMPLATES_AUTO_RELOAD'] = True  # 开启模板自动重载，，下一次请求时就会自动加载最新的模板内容，方便调试
-app.debug = True
+app.debug = True  #本地自动调试
 
+
+#全局异常处理器
 @app.errorhandler(Exception)
 def handle_exception(e):
-    # pass through HTTP errors
     if isinstance(e, HTTPException):
         return e
-    # now you're handling non-HTTP exceptions only
     print(traceback.format_exc())
     return render_template("500.html", e=e), 500
 
@@ -1179,29 +1167,13 @@ def test1():
 def test2():
     return render_template('test2.html', oss_custom_domain=OSS_CONFIG.get('CUSTOM_DOMAIN'))
 
-
-
 @app.route('/test3')  # 宣传视频
 def test3():
     return render_template('test3.html')
 
-
-
-
-# @app.route('/test4')  # 直播数字人
-# def test4():
-#   return render_template('test4.html')
-
-
-
-
-
 @app.route('/calendar')  # 日程安排
 def calendar():
     return render_template('calendar.html')
-
-
-
 
 @app.route('/note')
 def note():
