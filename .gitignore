@@ -110,6 +110,8 @@ frontend/.next/
 frontend/next-env.d.ts
 frontend/.env
 frontend/.env.local
+# TypeScript incremental 编译缓存（由 tsconfig incremental 生成）
+*.tsbuildinfo
 
 # Binaries and Build Artifacts
 bin/Release_2.85/
