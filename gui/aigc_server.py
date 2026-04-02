@@ -38,6 +38,7 @@ from flask import (
     Flask,
     request,
     jsonify,
+    send_file,
     send_from_directory,
     render_template,
     redirect,
@@ -56,6 +57,8 @@ from tts import qwen3
 from tts import volcano_tts
 from scheduler.thread_manager import MyThread
 from core import wsa_server
+from core import content_db
+from core import member_db
 from core.interact import Interact
 from core.task_db import Task_Db
 import fay_booter
@@ -2638,10 +2641,13 @@ def api_start_live():
     try:
         config_util.load_config()
         web = wsa_server.new_web_instance(port=10003)
-        web.start_server()
+        if not web.is_running():
+            web.start_server()
         human = wsa_server.new_instance(port=10004)
-        human.start_server()
-        fay_booter.start()
+        if not human.is_running():
+            human.start_server()
+        if not fay_booter.is_running():
+            fay_booter.start()
         wsa_server.get_web_instance().add_cmd({"liveState": 1})
         return '{"result":"successful"}'
     except Exception as e:
@@ -2651,11 +2657,46 @@ def api_start_live():
 @app.route("/api/stop-live", methods=["post"])
 def api_stop_live():
     try:
-        fay_booter.stop()
-        wsa_server.get_web_instance().add_cmd({"liveState": 0})
+        if fay_booter.is_running():
+            fay_booter.stop()
+        web = wsa_server.get_web_instance()
+        if web and web.is_running():
+            web.add_cmd({"liveState": 0})
         return '{"result":"successful"}'
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/get-msg", methods=["post"])
+def api_get_msg():
+    raw_data = request.form.get("data")
+    if not raw_data:
+        return jsonify({"list": []})
+
+    try:
+        payload = json.loads(raw_data)
+    except Exception:
+        return jsonify({"list": []})
+
+    username = payload.get("username", "User")
+    uid = member_db.new_instance().find_user(username)
+    if uid == 0:
+        return jsonify({"list": []})
+
+    rows = content_db.new_instance().get_list("all", "desc", 1000, uid)
+    result = []
+    for row in reversed(rows):
+        result.append(
+            {
+                "type": row[0],
+                "way": row[1],
+                "content": row[2],
+                "createtime": row[3],
+                "timetext": row[4],
+                "username": row[5],
+            }
+        )
+    return jsonify({"list": result})
 
 
 @app.route("/api/chat", methods=["post"])
@@ -2684,6 +2725,111 @@ def api_chat():
         return jsonify({"status": "success", "message": "Interaction started"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/asr", methods=["post"])
+def api_asr():
+    upload = request.files.get("file")
+    if upload is None or upload.filename == "":
+        return jsonify({"error": "Missing audio file"}), 400
+
+    asr_url = getattr(config_util, "qwen3_asr_url", "http://127.0.0.1:8001/asr")
+    safe_name = secure_filename(upload.filename) or "recording.webm"
+    
+    # 读取上传的音频数据
+    audio_data = upload.read()
+    
+    # 检查是否需要转换格式（WebM/OGG 等需要转换为 WAV）
+    needs_conversion = not safe_name.lower().endswith('.wav')
+    
+    if needs_conversion:
+        # 使用 pydub 将音频转换为 WAV 格式
+        try:
+            from pydub import AudioSegment
+            import io
+            
+            # 从上传的数据创建 AudioSegment
+            audio = AudioSegment.from_file(io.BytesIO(audio_data))
+            
+            # 转换为 16kHz 单声道 WAV
+            audio = audio.set_frame_rate(16000)
+            audio = audio.set_channels(1)
+            
+            # 导出为 WAV 格式
+            wav_buffer = io.BytesIO()
+            audio.export(wav_buffer, format="wav")
+            wav_buffer.seek(0)
+            
+            # 更新文件名和数据
+            safe_name = safe_name.rsplit('.', 1)[0] + '.wav' if '.' in safe_name else safe_name + '.wav'
+            audio_data = wav_buffer.read()
+            
+        except Exception as e:
+            print(f"Audio conversion error: {e}")
+            return jsonify({"error": f"Audio conversion failed: {e}"}), 400
+
+    try:
+        response = requests.post(
+            asr_url,
+            files={
+                "file": (
+                    safe_name,
+                    audio_data,
+                    "audio/wav",
+                )
+            },
+            timeout=180,
+        )
+    except requests.RequestException as exc:
+        return jsonify({"error": f"ASR service unavailable: {exc}"}), 502
+
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {"error": response.text or "Invalid ASR response"}
+
+    return jsonify(payload), response.status_code
+
+
+@app.route("/audio/<path:filename>")
+def serve_audio(filename):
+    audio_dir = os.path.join(os.getcwd(), "samples")
+    audio_path = os.path.join(audio_dir, filename)
+    if not os.path.isfile(audio_path):
+        return jsonify({"error": "Audio file not found"}), 404
+    return send_file(audio_path)
+
+
+@app.route("/api/latest-audio")
+def api_latest_audio():
+    samples_dir = Path(os.getcwd()) / "samples"
+    since = request.args.get("since", type=int)
+
+    if not samples_dir.exists():
+        return jsonify({"audio": None})
+
+    candidates = [path for path in samples_dir.glob("sample-*.wav") if path.is_file()]
+    if since is not None:
+        candidates = [
+            path
+            for path in candidates
+            if int(path.stat().st_mtime * 1000) >= since
+        ]
+
+    if not candidates:
+        return jsonify({"audio": None})
+
+    latest = max(candidates, key=lambda path: path.stat().st_mtime)
+    mtime_ms = int(latest.stat().st_mtime * 1000)
+    return jsonify(
+        {
+            "audio": {
+                "filename": latest.name,
+                "mtime_ms": mtime_ms,
+                "url": f"/audio/{latest.name}",
+            }
+        }
+    )
 
 
 @app.route("/api/ws-status")
