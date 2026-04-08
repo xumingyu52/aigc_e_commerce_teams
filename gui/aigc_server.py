@@ -59,6 +59,12 @@ from datetime import datetime
 import oss2
 import redis
 from gui.platforms import PLATFORM_CONFIG, COST_CONFIG
+from gui.ai_tools_task_result_utils import (
+    build_image_task_result,
+    build_video_task_result,
+    extract_task_product_id,
+    merge_saved_video_result,
+)
 
 #初始化Flask并配置一些基本设置
 app = Flask(__name__, static_url_path='/static')  #指定静态文件的URL路径为/static,图片等的路径
@@ -592,7 +598,7 @@ def index():
     return redirect("http://localhost:3000/login") # Redirect to Login Server
 
 # ----------------- Dashboard Redirects -----------------
-def video_generation_worker(task_id, ak, sk, generate_uuid):
+def video_generation_worker(task_id, ak, sk, generate_uuid, product_id=None):
     db = Task_Db()
     try:
         print(f"Task {task_id}: Starting video generation wait for {generate_uuid}")
@@ -614,7 +620,8 @@ def video_generation_worker(task_id, ak, sk, generate_uuid):
                     '视频生成成功！'
                 ]
             }
-            db.update_task_status(task_id, 'completed', result=result)
+            result = build_video_task_result(video_data, product_id)
+            db.update_task_status(task_id, "completed", result=result)
             print(f"Task {task_id}: Video generation completed")
         else:
             db.update_task_status(task_id, 'failed', error='视频生成超时或失败')
@@ -627,12 +634,16 @@ def video_generation_worker(task_id, ak, sk, generate_uuid):
 @app.route('/api/generate_video', methods=['POST'])
 def handle_generate_video():
     data = request.get_json()
-    image_url = data.get('image_url')
-    text_description = data.get('text_description', '')  # 获取文本描述
-    
+    image_url = data.get("image_url")
+    product_id = data.get("product_id")
+    text_description = data.get("text_description", "")  # 获取文本描述
+
     if not image_url:
-        return jsonify({'status': 'error', 'error': '缺少图片URL'}), 400
-    
+        return jsonify({"status": "error", "error": "缺少图片URL"}), 400
+
+    if product_id and not product_id.startswith("prod_"):
+        return jsonify({"status": "error", "error": "无效的商品ID格式"}), 400
+
     # 检查 LiblibAI 配置是否已加载
     if not LIBLIB_CONFIG:
         return jsonify({
@@ -696,16 +707,23 @@ def handle_generate_video():
             Task_Db().add_task(task_id, 'video_generation')
             
             # Start background thread
-            Thread(target=video_generation_worker, args=(task_id, ak, sk, generate_uuid)).start()
-            
-            return jsonify({
-                'status': 'success',
-                'task_id': task_id,
-                'message': '任务已提交，请稍后查询状态'
-            })
-            
-        return jsonify({'status': 'error', 'error': result.get('msg', '视频生成失败')}), 500
-        
+            Thread(
+                target=video_generation_worker,
+                args=(task_id, ak, sk, generate_uuid, product_id),
+            ).start()
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "task_id": task_id,
+                    "message": "任务已提交，请稍后查询状态",
+                }
+            )
+
+        return jsonify(
+            {"status": "error", "error": result.get("msg", "视频生成失败")}
+        ), 500
+
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
 
@@ -1006,7 +1024,7 @@ def get_img2img_handler():
     return img2img_handler
 
 # -------------------------------------------------------------------------------------------
-def image_generation_worker(task_id, generate_uuid):
+def image_generation_worker(task_id, generate_uuid, product_id=None):
     db = Task_Db()
     try:
         print(f"Task {task_id}: Starting image generation wait for {generate_uuid}")
@@ -1033,11 +1051,8 @@ def image_generation_worker(task_id, generate_uuid):
                 images = data.get("images", [])
                 if images and len(images) > 0:
                     image_url = images[0].get("imageUrl")
-                    result = {
-                        'image_url': image_url,
-                        'percent': 100
-                    }
-                    db.update_task_status(task_id, 'completed', result=result)
+                    result = build_image_task_result(image_url, product_id)
+                    db.update_task_status(task_id, "completed", result=result)
                     print(f"Task {task_id}: Image generation completed")
                     return
                 else:
@@ -1079,6 +1094,10 @@ def generate_img2img():
                 "data": None
             }), 400
 
+        product_id = data.get("product_id")
+        if product_id and not product_id.startswith("prod_"):
+            return jsonify({"code": 1, "msg": "无效的商品ID格式", "data": None}), 400
+
         # 提交任务
         handler = get_img2img_handler()
         submit_response = handler.submit_task(data['image_url'])
@@ -1098,7 +1117,10 @@ def generate_img2img():
         Task_Db().add_task(task_id, 'image_generation')
         
         # Start background thread
-        Thread(target=image_generation_worker, args=(task_id, generate_uuid)).start()
+        Thread(
+            target=image_generation_worker,
+            args=(task_id, generate_uuid, product_id),
+        ).start()
 
         return jsonify({
             "code": 0,
@@ -2525,11 +2547,12 @@ def get_oss_products():
 def save_generated_content():
     try:
         data = request.get_json()
-        product_id = data['product_id']
-        content_type = data['type']  # 'image' 或 'video'
-        file_url = data['file_url']
-        custom_path = data.get('custom_path', '')
-        
+        product_id = data["product_id"]
+        content_type = data["type"]  # 'image' 或 'video'
+        file_url = data["file_url"]
+        custom_path = data.get("custom_path", "")
+        task_id = data.get("task_id")
+
         # 验证商品ID格式
         if not product_id.startswith('prod_'):
             return jsonify({'status': 'error', 'error': '无效的商品ID格式'}), 400
@@ -2590,13 +2613,21 @@ def save_generated_content():
             # 返回OSS访问URL
             oss_url = f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/{save_path}"
             print(f"[OSS上传] 上传成功: {oss_url}")
-            
-            return jsonify({
-                'status': 'success',
-                'oss_url': oss_url,
-                'save_path': save_path
-            })
-            
+
+            if content_type == "video" and task_id:
+                db = Task_Db()
+                task = db.get_task(task_id)
+                if task:
+                    merged_result = merge_saved_video_result(
+                        task.get("result"), oss_url
+                    )
+                    task_status = task.get("status") or "completed"
+                    db.update_task_status(task_id, task_status, result=merged_result)
+
+            return jsonify(
+                {"status": "success", "oss_url": oss_url, "save_path": save_path}
+            )
+
         except requests.exceptions.RequestException as e:
             error_msg = f"下载文件失败: {str(e)}"
             print(error_msg)
