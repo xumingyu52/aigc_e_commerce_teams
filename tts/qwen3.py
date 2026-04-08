@@ -5,6 +5,11 @@ import os
 from utils import util, config_util as cfg
 from tts import tts_voice
 
+
+def get_qwen_voices():
+    return tts_voice.get_qwen_voice_options()
+
+
 class Speech:
     def __init__(self):
         # 从配置中获取服务端地址，如果没有则使用默认值

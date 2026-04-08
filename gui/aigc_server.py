@@ -53,8 +53,7 @@ from core import content_db
 from core import member_db
 from core.interact import Interact
 from core.task_db import Task_Db
-import fay_booter
-import pandas as pd
+import avatar_runtime
 import subprocess
 from http import HTTPStatus
 from urllib.parse import urlparse, unquote, urlencode
@@ -81,6 +80,8 @@ from gui.ai_tools_task_result_utils import (
     extract_task_product_id,
     merge_saved_video_result,
 )
+from backend.routes import live_routes
+from backend.services.live_service import live_service
 
 #初始化Flask并配置一些基本设置
 app = Flask(__name__, static_url_path='/static')  #指定静态文件的URL路径为/static,图片等的路径
@@ -2218,47 +2219,17 @@ def api_start_live():
 
 @app.route('/api/stop-live', methods=['post'])
 def api_stop_live():
-    try:
-        if fay_booter.is_running():
-            fay_booter.stop()
-        web = wsa_server.get_web_instance()
-        if web and web.is_running():
-            web.add_cmd({"liveState": 0})
-        return '{"result":"successful"}'
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return live_routes.api_stop_live()
 
 
 @app.route("/api/get-msg", methods=["post"])
 def api_get_msg():
-    raw_data = request.form.get("data")
-    if not raw_data:
-        return jsonify({"list": []})
+    return live_routes.api_get_msg()
 
-    try:
-        payload = json.loads(raw_data)
-    except Exception:
-        return jsonify({"list": []})
 
-    username = payload.get("username", "User")
-    uid = member_db.new_instance().find_user(username)
-    if uid == 0:
-        return jsonify({"list": []})
-
-    rows = content_db.new_instance().get_list("all", "desc", 1000, uid)
-    result = []
-    for row in reversed(rows):
-        result.append(
-            {
-                "type": row[0],
-                "way": row[1],
-                "content": row[2],
-                "createtime": row[3],
-                "timetext": row[4],
-                "username": row[5],
-            }
-        )
-    return jsonify({"list": result})
+@app.route("/api/get-member-list", methods=["post"])
+def api_get_member_list():
+    return live_routes.api_get_member_list()
 
 
 @app.route("/api/chat", methods=["post"])

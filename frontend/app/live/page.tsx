@@ -26,6 +26,7 @@ type LiveTab = 'chat' | 'product'
 type LiveStage = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'offline'
 
 type ChatMessage = {
+  id: string
   user: string
   message: string
   level: string
@@ -33,7 +34,7 @@ type ChatMessage = {
 }
 
 type PanelReply = {
-  type?: 'member' | 'fay' | string
+  type?: 'member' | 'avatar' | 'assistant' | string
   content?: string
   username?: string
   uid?: number
@@ -58,25 +59,31 @@ type LatestAudioPayload = {
 
 const DEFAULT_USER = 'User'
 const MAX_CHAT_MESSAGES = 80
+const LEGACY_AVATAR_MESSAGE_TYPES = new Set(['avatar', 'assistant', 'fay'])
 
 const SPEAKER_STYLES: Record<string, { level: string; color: string }> = {
   system: { level: 'SYS', color: '#ff4d4f' },
   member: { level: 'UL5', color: '#00aeec' },
-  fay: { level: 'AI', color: '#7c3aed' },
+  avatar: { level: 'AI', color: '#7c3aed' },
 }
 
 function trimMessages(messages: ChatMessage[]) {
   return messages.slice(-MAX_CHAT_MESSAGES)
 }
 
-function createMessage(user: string, message: string, type: 'system' | 'member' | 'fay'): ChatMessage {
+function createMessage(user: string, message: string, type: 'system' | 'member' | 'avatar'): ChatMessage {
   const style = SPEAKER_STYLES[type]
   return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     user,
     message,
     level: style.level,
     color: style.color,
   }
+}
+
+function isAvatarMessageType(type?: string) {
+  return typeof type === 'string' && LEGACY_AVATAR_MESSAGE_TYPES.has(type)
 }
 
 function useEvent<T extends (...args: never[]) => unknown>(callback: T): T {
@@ -91,7 +98,10 @@ function useEvent<T extends (...args: never[]) => unknown>(callback: T): T {
 
 export default function LivePage() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const chatListRef = useRef<HTMLDivElement>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
   const websocketRef = useRef<WebSocket | null>(null)
+  const activeSocketIdRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const audioPulseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -102,10 +112,11 @@ export default function LivePage() {
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
   const latestAudioRequestRef = useRef(0)
   const lastPlayedAudioKeyRef = useRef('')
+  const recentMessageKeysRef = useRef<string[]>([])
 
   const [activeTab, setActiveTab] = useState<LiveTab>('chat')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    createMessage('系统通知', '直播页已接入现有 Fay 服务链路。', 'system'),
+    createMessage('系统通知', '直播页已接入现有 Live2D 服务链路。', 'system'),
   ])
   const [inputMessage, setInputMessage] = useState('')
   const [panelMessage, setPanelMessage] = useState('待机中')
@@ -194,9 +205,25 @@ export default function LivePage() {
   })
 
   const appendChatMessage = useEvent((message: ChatMessage) => {
+    const messageKey = `${message.level}|${message.user}|${message.message.trim()}`
+    if (recentMessageKeysRef.current.includes(messageKey)) {
+      return
+    }
+    recentMessageKeysRef.current = [...recentMessageKeysRef.current.slice(-30), messageKey]
     startTransition(() => {
       setChatMessages((prev) => trimMessages([...prev, message]))
     })
+  })
+
+  const scrollChatToBottom = useEvent((behavior: ScrollBehavior = 'smooth') => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior, block: 'end' })
+      return
+    }
+    const list = chatListRef.current
+    if (list) {
+      list.scrollTo({ top: list.scrollHeight, behavior })
+    }
   })
 
   const fetchMessageHistory = useEvent(async () => {
@@ -217,14 +244,20 @@ export default function LivePage() {
       }
       const history = payload.list
         .map((item) => {
-          const kind = item.type === 'fay' ? 'fay' : 'member'
-          return createMessage(item.username || (kind === 'fay' ? 'Fay' : DEFAULT_USER), item.content || '', kind)
+          const kind = isAvatarMessageType(item.type) ? 'avatar' : 'member'
+          return createMessage(item.username || (kind === 'avatar' ? 'Avatar' : DEFAULT_USER), item.content || '', kind)
         })
         .filter((item) => item.message.trim().length > 0)
       if (!history.length) {
         return
       }
+      recentMessageKeysRef.current = history
+        .slice(-30)
+        .map((item) => `${item.level}|${item.user}|${item.message.trim()}`)
       setChatMessages(trimMessages(history))
+      requestAnimationFrame(() => {
+        scrollChatToBottom('auto')
+      })
     } catch {
       // Keep the page usable even if history loading fails.
     }
@@ -359,10 +392,10 @@ export default function LivePage() {
     }
 
     if (data.panelReply?.content) {
-      const isFay = data.panelReply.type === 'fay'
-      const user = data.panelReply.username || (isFay ? 'Fay' : DEFAULT_USER)
-      appendChatMessage(createMessage(user, data.panelReply.content, isFay ? 'fay' : 'member'))
-      if (isFay) {
+      const isAvatar = isAvatarMessageType(data.panelReply.type)
+      const user = data.panelReply.username || (isAvatar ? 'Avatar' : DEFAULT_USER)
+      appendChatMessage(createMessage(user, data.panelReply.content, isAvatar ? 'avatar' : 'member'))
+      if (isAvatar) {
         pulseSpeakingState()
         if (lastInteractionAtRef.current > 0) {
           void pollLatestAudio(lastInteractionAtRef.current)
@@ -379,9 +412,15 @@ export default function LivePage() {
 
     setStageStatus((prev) => (prev === 'offline' ? 'connecting' : prev))
     const socket = new WebSocket(getWsUrl())
+    const socketId = Date.now() + Math.floor(Math.random() * 1000)
+    activeSocketIdRef.current = socketId
     websocketRef.current = socket
 
     socket.onopen = () => {
+      if (activeSocketIdRef.current !== socketId) {
+        socket.close()
+        return
+      }
       setStageStatus(liveState === 1 ? 'idle' : 'connecting')
       setPanelMessage(liveState === 1 ? '已连接面板服务' : '面板已连接，等待直播启动')
       socket.send(JSON.stringify({ Username: DEFAULT_USER }))
@@ -389,6 +428,9 @@ export default function LivePage() {
     }
 
     socket.onmessage = (event) => {
+      if (activeSocketIdRef.current !== socketId) {
+        return
+      }
       try {
         handleIncomingMessage(JSON.parse(event.data) as WsPayload)
       } catch {
@@ -397,11 +439,16 @@ export default function LivePage() {
     }
 
     socket.onclose = () => {
-      websocketRef.current = null
+      if (activeSocketIdRef.current === socketId) {
+        websocketRef.current = null
+      }
       stopAudioPulse()
       setStageStatus((prev) => (liveState === 1 ? 'connecting' : prev === 'offline' ? 'offline' : 'connecting'))
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
+      }
+      if (activeSocketIdRef.current !== socketId) {
+        return
       }
       reconnectTimerRef.current = setTimeout(() => {
         connectWebSocket()
@@ -439,7 +486,7 @@ export default function LivePage() {
 
     setIsSending(true)
     lastInteractionAtRef.current = Date.now()
-    setPanelMessage('消息已提交，等待 Fay 响应...')
+      setPanelMessage('消息已提交，等待数字人响应...')
 
     try {
       await postJson('/api/chat', {
@@ -705,6 +752,7 @@ export default function LivePage() {
     connectWebSocket()
 
     return () => {
+      activeSocketIdRef.current += 1
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
       }
@@ -719,6 +767,12 @@ export default function LivePage() {
       stopAudioPulse()
     }
   }, [connectWebSocket, fetchRuntimeStatus, releaseMicrophone, stopAudioPulse, stopNativeAudio])
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      scrollChatToBottom(chatMessages.length <= 2 ? 'auto' : 'smooth')
+    })
+  }, [chatMessages, scrollChatToBottom])
 
   const serviceLabel =
     stageStatus === 'thinking'
@@ -877,7 +931,7 @@ export default function LivePage() {
           <div className="host-info">
             <div className="avatar"></div>
             <div className="host-details">
-              <div className="host-name">Fay Live2D Host</div>
+              <div className="host-name">Live2D Host</div>
               <div className="host-topic">{panelMessage}</div>
             </div>
             <div className="live-status">{serviceLabel}</div>
@@ -890,7 +944,7 @@ export default function LivePage() {
               <div className="stage-light"></div>
               <div className="brand-badge">
                 <span className="brand-icon">AI</span>
-                <span className="brand-text">Fay Runtime</span>
+                <span className="brand-text">Avatar Runtime</span>
               </div>
               <div className="product-corner">
                 <div className="corner-item">
@@ -945,9 +999,9 @@ export default function LivePage() {
 
           {activeTab === 'chat' ? (
             <>
-              <div className="chat-list">
+              <div className="chat-list" ref={chatListRef}>
                 {chatMessages.map((msg, index) => (
-                  <div key={`${msg.user}-${index}-${msg.message}`} className="chat-item" style={{ animationDelay: `${index * 0.03}s` }}>
+                  <div key={msg.id} className="chat-item" style={{ animationDelay: `${index * 0.03}s` }}>
                     <div className="chat-header">
                       <span className="user-level" style={{ backgroundColor: msg.color }}>
                         {msg.level}
@@ -957,6 +1011,7 @@ export default function LivePage() {
                     <span className="chat-message">{msg.message}</span>
                   </div>
                 ))}
+                <div ref={chatEndRef} />
               </div>
               <div className="input-bar">
                 <button
@@ -978,7 +1033,7 @@ export default function LivePage() {
                 </button>
                 <input
                   type="text"
-                  placeholder={liveState === 1 ? '输入文本，走现有 Fay NLP 链路...' : '请先启动直播服务'}
+                  placeholder={liveState === 1 ? '输入文本，走现有 Live2D NLP 链路...' : '请先启动直播服务'}
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyDown={(e) => {
@@ -1002,7 +1057,7 @@ export default function LivePage() {
                 <div className="product-info">
                   <div className="product-name">ASR / NLP / 情感分析</div>
                   <div className="status-copy">
-                    当前页面通过现有 Fay 后端链路触发文本互动，并消费 WebSocket 回推结果。
+                    当前页面通过现有 Live2D 后端链路触发文本互动，并消费 WebSocket 回推结果。
                   </div>
                   <button className="buy-btn" onClick={() => void fetchMessageHistory()}>
                     同步历史

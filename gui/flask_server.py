@@ -1,5 +1,4 @@
-import importlib
-import sys
+﻿import sys
 import os
 # --- 路径设置开始 (必须在所有导入之前) ---
 # 获取项目根目录（从 gui 目录向上一级）
@@ -17,20 +16,11 @@ import pyaudio
 import re
 from flask import Flask, render_template, request, jsonify, Response, send_file
 from flask_cors import CORS
-import requests
 
-from tts import tts_voice
-from tts import qwen3
-from tts import volcano_tts
 from gevent import pywsgi
 from scheduler.thread_manager import MyThread
-from utils import config_util, util
+from utils import config_util
 from core import wsa_server
-from core import fay_core
-from core import content_db
-from core.interact import Interact
-from core import member_db
-import fay_booter
 from flask_httpauth import HTTPBasicAuth
 
 
@@ -39,6 +29,7 @@ app = Flask(__name__)
 app.config['DEBUG'] = True
 auth = HTTPBasicAuth()
 CORS(app, supports_credentials=True)
+MAIN_API_BASE_URL = os.environ.get("MAIN_API_BASE_URL", "http://127.0.0.1:5000")
 
 
 def load_users():
@@ -71,9 +62,39 @@ def __get_device_list():
             if devInfo['hostApi'] == 0:
                 device_list.append(devInfo["name"])
 
-        return list(set(device_list))
-    else:
-        return []
+    try:
+        upstream = requests.request(
+            method=request.method,
+            url=target_url,
+            params=request.args,
+            data=request.get_data(),
+            headers=headers,
+            cookies=request.cookies,
+            stream=stream,
+            timeout=300 if stream else 120,
+        )
+    except requests.RequestException as exc:
+        return jsonify({"error": f"main api unavailable: {exc}"}), 502
+
+    excluded_headers = {"content-encoding", "transfer-encoding", "connection"}
+    response_headers = [
+        (name, value)
+        for name, value in upstream.headers.items()
+        if name.lower() not in excluded_headers
+    ]
+
+    if stream:
+        return Response(
+            upstream.iter_content(chunk_size=8192),
+            status=upstream.status_code,
+            headers=response_headers,
+        )
+
+    return Response(
+        upstream.content,
+        status=upstream.status_code,
+        headers=response_headers,
+    )
 
 
 @app.route('/api/submit', methods=['post'])
@@ -238,11 +259,7 @@ def api_start_live():
 
 @app.route('/api/stop-live', methods=['post'])
 def api_stop_live():
-    # time.sleep(1)
-    fay_booter.stop()
-    time.sleep(1)
-    wsa_server.get_web_instance().add_cmd({"liveState": 0})
-    return '{"result":"successful"}'
+    return _proxy_to_main_api("/api/stop-live")
 
 
 @app.route('/api/send', methods=['post'])
