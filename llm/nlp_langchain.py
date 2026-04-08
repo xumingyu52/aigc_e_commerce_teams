@@ -104,7 +104,7 @@ def get_similar_texts(query, user_id=None, index_name="knowledge_data", k=3):
         embedding = OpenAIEmbeddings(model="text-embedding-ada-002")
         vectordb = Chroma(persist_directory=index_path, embedding_function=embedding)
         
-        # 构建过滤器：如果是查用户偏好，则只看该 user_id 的
+        # 构建过滤器
         filter_dict = {}
         if user_id:
             filter_dict['user_id'] = user_id
