@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 from dotenv import load_dotenv
 from flask import redirect, url_for
@@ -1165,7 +1165,8 @@ def test1():
 
 @app.route('/test2')  # 宣传图
 def test2():
-    return render_template('test2.html', oss_custom_domain=OSS_CONFIG.get('CUSTOM_DOMAIN'))
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    return redirect(f"{frontend_url}/ai-tools/image")
 
 @app.route('/test3')  # 宣传视频
 def test3():
@@ -1206,6 +1207,19 @@ OSS_CONFIG = {
     'BUCKET_NAME': os.getenv('ALIYUN_OSS_BUCKET', 'oceanedgen'),
     'CUSTOM_DOMAIN': os.getenv('ALIYUN_OSS_CUSTOM_DOMAIN', 'oceanedgen.oss-cn-shenzhen.aliyuncs.com')
 }
+
+
+@app.route("/api/runtime-config/image", methods=["GET"])
+def get_image_runtime_config():
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "oss_custom_domain": OSS_CONFIG.get("CUSTOM_DOMAIN") or "",
+            },
+        }
+    )
+
 
 auth = None
 bucket = None
