@@ -2706,21 +2706,25 @@ def get_oss_products_by_category():
 
     try:
         # 双重解码URL编码
+        # local_bucket: 局部作用域的OSS桶对象，用于当前请求的OSS操作
+        local_bucket = _create_oss_bucket()
         decoded_category = unquote(unquote(category))
         oss_path = f"products/_index/by_category/{decoded_category}.json"
         
         # 验证文件存在性
-        if not bucket.object_exists(oss_path):
-            return jsonify({
-                "status": "success",
-                "data": [],
-                "message": f"分类'{decoded_category}'暂无商品"
-            })
+        if not local_bucket.object_exists(oss_path):
+            return jsonify(
+                {
+                    "status": "success",
+                    "data": [],
+                    "message": f"分类'{decoded_category}'暂无商品",
+                }
+            )
 
         # 读取OSS文件内容
-        obj = bucket.get_object(oss_path)
-        products = json.loads(obj.read().decode('utf-8'))
-        
+        obj = local_bucket.get_object(oss_path)
+        products = json.loads(obj.read().decode("utf-8"))
+
         # 验证数据格式
         if not isinstance(products, list):
             raise ValueError("商品数据格式错误，应为数组")
