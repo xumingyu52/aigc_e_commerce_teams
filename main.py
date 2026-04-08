@@ -1,4 +1,4 @@
-#入口文件main
+﻿#入口文件main
 import atexit
 import importlib
 import os
@@ -111,7 +111,6 @@ def stop_frontend(process):
 def start_http_services():
     services = [
         ("login_server", "gui.login_server"),
-        ("dashboard_server", "gui.app"),
         ("aigc_server", "gui.aigc_server"),
         ("flask_server", "gui.flask_server"),
     ]

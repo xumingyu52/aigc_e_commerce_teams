@@ -1,10 +1,8 @@
 ﻿import sys
 import os
 # --- 路径设置开始 (必须在所有导入之前) ---
-# 获取项目根目录（从 gui 目录向上一级）
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
-# 将项目根目录添加到 Python 路径
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 # --- 路径设置结束 ---
@@ -16,13 +14,8 @@ import pyaudio
 import re
 from flask import Flask, render_template, request, jsonify, Response, send_file
 from flask_cors import CORS
-
 from gevent import pywsgi
 from scheduler.thread_manager import MyThread
-from utils import config_util
-from core import wsa_server
-from flask_httpauth import HTTPBasicAuth
-
 
 
 app = Flask(__name__)
@@ -597,10 +590,9 @@ def serve_gif(filename):
 
 @app.errorhandler(500)
 def internal_error(error):
-    return f"Internal Server Error: {str(error)}", 500
+    return jsonify({"status": "error", "error": str(error)}), 500
 
 
-# ==========================================
 def run():
     server = pywsgi.WSGIServer(('0.0.0.0', 6000), app)
     server.serve_forever()
@@ -608,3 +600,4 @@ def run():
 
 def start():
     MyThread(target=run).start()
+

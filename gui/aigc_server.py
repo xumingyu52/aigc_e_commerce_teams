@@ -23,9 +23,6 @@ if project_root not in sys.path:
 # 导入配置工具
 from utils import config_util
 
-# 导入 TTS 相关模块 (使用 try-except 防止因缺少文件导致崩溃)
-
-
 #  导入标准库和第三方库 ---
 from flask import (
     Flask,
@@ -33,7 +30,6 @@ from flask import (
     jsonify,
     send_file,
     send_from_directory,
-    render_template,
     redirect,
     url_for,
     Response,
@@ -49,11 +45,7 @@ from tts import qwen3
 from tts import volcano_tts
 from scheduler.thread_manager import MyThread
 from core import wsa_server
-from core import content_db
-from core import member_db
-from core.interact import Interact
 from core.task_db import Task_Db
-import avatar_runtime
 import subprocess
 from http import HTTPStatus
 from urllib.parse import urlparse, unquote, urlencode
@@ -61,7 +53,6 @@ from pathlib import PurePosixPath, Path
 import requests
 from dashscope import ImageSynthesis
 from werkzeug.exceptions import HTTPException
-from werkzeug.utils import secure_filename
 import hmac
 import base64
 import uuid   #随机生成库
@@ -80,7 +71,6 @@ from gui.ai_tools_task_result_utils import (
     extract_task_product_id,
     merge_saved_video_result,
 )
-from backend.routes import live_routes
 from backend.services.live_service import live_service
 
 #初始化Flask并配置一些基本设置
@@ -96,7 +86,7 @@ def handle_exception(e):
     if isinstance(e, HTTPException):
         return e
     print(traceback.format_exc())
-    return render_template("500.html", e=e), 500
+    return jsonify({"status": "error", "error": str(e)}), 500
 
 CORS(app)
 
@@ -193,7 +183,7 @@ def dashboard_html_redirect():
 
 @app.route('/dashboard_internal')
 def dashboard_internal_redirect():
-    return redirect("http://localhost:5001/dashboard_internal")
+    return _legacy_page_retired("dashboard_internal", "/dashboard/analytics/analyst")
 
 @app.route('/dashboard_internal.html')
 def dashboard_internal_html_redirect():
@@ -615,6 +605,17 @@ def index():
     return redirect("http://localhost:3000/login") # Redirect to Login Server
 
 # ----------------- Dashboard Redirects -----------------
+
+def _legacy_page_retired(route_name: str, frontend_path: str | None = None):
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    payload = {
+        "status": "gone",
+        "message": f"旧页面路由 {route_name} 已下线，当前项目统一使用 frontend 前端。",
+    }
+    if frontend_path:
+        payload["frontend_url"] = f"{frontend_url}{frontend_path}"
+    return jsonify(payload), 410
+
 def video_generation_worker(task_id, ak, sk, generate_uuid, product_id=None):
     db = Task_Db()
     try:
@@ -2219,17 +2220,17 @@ def api_start_live():
 
 @app.route('/api/stop-live', methods=['post'])
 def api_stop_live():
-    return live_routes.api_stop_live()
+    return jsonify(live_service.stop_live())
 
 
 @app.route("/api/get-msg", methods=["post"])
 def api_get_msg():
-    return live_routes.api_get_msg()
+    return jsonify(live_service.get_message_history(request))
 
 
 @app.route("/api/get-member-list", methods=["post"])
 def api_get_member_list():
-    return live_routes.api_get_member_list()
+    return jsonify(live_service.get_member_list())
 
 
 @app.route("/api/chat", methods=["post"])
@@ -2759,3 +2760,10 @@ def get_oss_products_by_category():
         }), 500
 if __name__ == '__main__':
     run()
+
+
+
+
+
+
+
