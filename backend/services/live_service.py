@@ -76,6 +76,12 @@ class LiveService:
     def stop_live(self):
         if avatar_runtime.is_running():
             avatar_runtime.stop()
+        web = wsa_server.get_web_instance()
+        if web and web.is_running():
+            web.stop_server()
+        human = wsa_server.get_instance()
+        if human and human.is_running():
+            human.stop_server()
         self._broadcast_live_state(0)
         return {"result": "successful"}
 
@@ -162,6 +168,7 @@ class LiveService:
         ui = wsa_server.get_web_instance()
         human = wsa_server.get_instance()
         return {
+            "avatar_running": bool(avatar_runtime.is_running()),
             "ui_server_running": bool(ui is not None and ui.is_running()),
             "human_server_running": bool(human is not None and human.is_running()),
             "human_client_connected": bool(human.isConnect if human else False),
