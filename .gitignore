@@ -218,3 +218,5 @@ test3重构指南.md
 .gitignore
 incremental_updates.db
 avatar.db
+
+.worktrees/
