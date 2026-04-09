@@ -23,6 +23,7 @@ from flask import (
     redirect,
 )
 from flask_cors import CORS
+from flask_httpauth import HTTPBasicAuth
 from gevent import pywsgi
 from scheduler.thread_manager import MyThread
 
