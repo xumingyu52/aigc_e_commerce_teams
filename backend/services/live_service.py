@@ -3,6 +3,7 @@ import os
 import time
 import threading
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import jsonify, send_file
 
@@ -14,6 +15,8 @@ from core import content_db, member_db, wsa_server
 from core.interact import Interact
 from scheduler.thread_manager import MyThread
 from tts import qwen3, tts_voice, volcano_tts
+from utils.runtime_checks import build_health_url, find_ffmpeg_executable, probe_http_health, probe_tcp_port
+from utils.trace_utils import ensure_request_id, summarize_text, trace_log
 
 
 class LiveService:
@@ -22,6 +25,43 @@ class LiveService:
     def __init__(self):
         self._voice_lock = threading.RLock()
         self._voice_list = None
+        self._latest_audio_log_lock = threading.RLock()
+        self._latest_audio_miss_count = 0
+
+    def _trace_latest_audio(self, *, request_id: str, since: int | None, total_files: int, filtered_files: int,
+                            matched_filename: str = "", matched_mtime_ms: int | None = None):
+        debug_enabled = os.getenv("LIVE_AUDIO_POLL_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+        with self._latest_audio_log_lock:
+            if matched_filename:
+                self._latest_audio_miss_count = 0
+                trace_log(
+                    module="live_service",
+                    stage="latest_audio",
+                    status="ok",
+                    request_id=request_id,
+                    since=since,
+                    total_files=total_files,
+                    filtered_files=filtered_files,
+                    matched_filename=matched_filename,
+                    matched_mtime_ms=matched_mtime_ms or "",
+                    miss_count=0,
+                )
+                return
+
+            self._latest_audio_miss_count += 1
+            miss_count = self._latest_audio_miss_count
+            if debug_enabled or miss_count == 1 or miss_count % 10 == 0:
+                trace_log(
+                    module="live_service",
+                    stage="latest_audio",
+                    status="empty",
+                    request_id=request_id,
+                    since=since,
+                    total_files=total_files,
+                    filtered_files=filtered_files,
+                    matched_filename="",
+                    miss_count=miss_count,
+                )
 
     def _get_voice_list(self, force_reload: bool = False):
         with self._voice_lock:
@@ -118,23 +158,76 @@ class LiveService:
         users = member_db.new_instance().get_all_users()
         return {"list": [{"uid": row[0], "username": row[1]} for row in users]}
 
-    def submit_chat(self, payload):
+    def submit_chat(self, payload, request_id: str | None = None):
+        started_at = time.perf_counter()
         dto = ChatRequest.from_payload(payload)
+        effective_request_id = ensure_request_id(request_id or dto.request_id)
         if not dto.text:
-            return {"error": "Empty text"}, 400
+            trace_log(
+                module="live_service",
+                stage="submit_chat",
+                status="error",
+                request_id=effective_request_id,
+                error="empty_text",
+                time_cost=(time.perf_counter() - started_at) * 1000,
+                user=dto.user,
+            )
+            return {"error": "Empty text", "request_id": effective_request_id}, 400
 
         avatar = self._ensure_runtime()
-        interact = Interact("text", 1, {"user": dto.user, "msg": dto.text})
+        interact = Interact("text", 1, {"user": dto.user, "msg": dto.text, "request_id": effective_request_id})
+        trace_log(
+            module="live_service",
+            stage="submit_chat",
+            status="ok",
+            request_id=effective_request_id,
+            time_cost=(time.perf_counter() - started_at) * 1000,
+            user=dto.user,
+            text_len=len(dto.text),
+            text_preview=summarize_text(dto.text),
+        )
         MyThread(target=avatar.on_interact, args=[interact]).start()
-        return {"status": "success", "message": "Interaction started"}, 200
+        return {"status": "success", "message": "Interaction started", "request_id": effective_request_id}, 200
 
-    def transcribe_audio(self, upload):
+    def transcribe_audio(self, upload, request_id: str | None = None):
+        started_at = time.perf_counter()
+        effective_request_id = ensure_request_id(request_id)
         if upload is None or upload.filename == "":
-            return {"error": "Missing audio file"}, 400
+            trace_log(
+                module="live_service",
+                stage="transcribe_audio",
+                status="error",
+                request_id=effective_request_id,
+                error="missing_audio_file",
+                time_cost=(time.perf_counter() - started_at) * 1000,
+            )
+            return {"error": "Missing audio file", "request_id": effective_request_id}, 400
         try:
-            return qwen3_asr_adapter.transcribe_upload(upload)
+            payload, status = qwen3_asr_adapter.transcribe_upload(upload, request_id=effective_request_id)
+            payload.setdefault("request_id", effective_request_id)
+            trace_log(
+                module="live_service",
+                stage="transcribe_audio",
+                status="ok" if status < 400 else "error",
+                request_id=effective_request_id,
+                error="" if status < 400 else summarize_text(payload.get("error") or payload.get("detail")),
+                time_cost=(time.perf_counter() - started_at) * 1000,
+                filename=getattr(upload, "filename", ""),
+                asr_status=status,
+                text_len=len(str(payload.get("text", "") or "")),
+            )
+            return payload, status
         except Exception as exc:
-            return {"error": f"Audio conversion failed: {exc}"}, 400
+            trace_log(
+                module="live_service",
+                stage="transcribe_audio",
+                status="error",
+                request_id=effective_request_id,
+                error=summarize_text(exc),
+                time_cost=(time.perf_counter() - started_at) * 1000,
+                filename=getattr(upload, "filename", ""),
+            )
+            return {"error": f"Audio conversion failed: {exc}", "request_id": effective_request_id}, 400
 
     def serve_audio_file(self, filename):
         audio_dir = os.path.join(os.getcwd(), "samples")
@@ -143,25 +236,48 @@ class LiveService:
             return jsonify({"error": "Audio file not found"}), 404
         return send_file(audio_path)
 
-    def get_latest_audio(self, since: int | None):
+    def get_latest_audio(self, since: int | None, request_id: str | None = None):
+        effective_request_id = ensure_request_id(request_id)
         samples_dir = Path(os.getcwd()) / "samples"
         if not samples_dir.exists():
-            return {"audio": None}
+            self._trace_latest_audio(
+                request_id=effective_request_id,
+                since=since,
+                total_files=0,
+                filtered_files=0,
+            )
+            return {"audio": None, "request_id": effective_request_id}
 
-        candidates = [path for path in samples_dir.glob("sample-*.wav") if path.is_file()]
+        all_candidates = [path for path in samples_dir.glob("sample-*.wav") if path.is_file()]
+        candidates = list(all_candidates)
         if since is not None:
             candidates = [path for path in candidates if int(path.stat().st_mtime * 1000) >= since]
         if not candidates:
-            return {"audio": None}
+            self._trace_latest_audio(
+                request_id=effective_request_id,
+                since=since,
+                total_files=len(all_candidates),
+                filtered_files=0,
+            )
+            return {"audio": None, "request_id": effective_request_id}
 
         latest = max(candidates, key=lambda path: path.stat().st_mtime)
         mtime_ms = int(latest.stat().st_mtime * 1000)
+        self._trace_latest_audio(
+            request_id=effective_request_id,
+            since=since,
+            total_files=len(all_candidates),
+            filtered_files=len(candidates),
+            matched_filename=latest.name,
+            matched_mtime_ms=mtime_ms,
+        )
         return {
             "audio": {
                 "filename": latest.name,
                 "mtime_ms": mtime_ms,
                 "url": f"/audio/{latest.name}",
-            }
+            },
+            "request_id": effective_request_id,
         }
 
     def get_ws_status(self):
@@ -172,6 +288,51 @@ class LiveService:
             "ui_server_running": bool(ui is not None and ui.is_running()),
             "human_server_running": bool(human is not None and human.is_running()),
             "human_client_connected": bool(human.isConnect if human else False),
+        }
+
+    def get_live_health(self):
+        runtime_config.reload_runtime_config()
+        ui = wsa_server.get_web_instance()
+        tts_url = runtime_config.get_tts_url()
+        asr_url = runtime_config.get_asr_url()
+        ffmpeg_path = find_ffmpeg_executable()
+        ws_probe = probe_tcp_port("127.0.0.1", 10003, timeout=1.0)
+
+        checks = {
+            "api_5000": {
+                "ok": True,
+                "detail": "current /api/health/live route is reachable",
+                "port": 5000,
+            },
+            "ws_10003": {
+                "ok": bool(ui is not None and ui.is_running()) and bool(ws_probe.get("ok")),
+                "detail": ws_probe.get("detail") if not (ui is not None and ui.is_running()) else "reachable",
+                "port": 10003,
+            },
+            "tts_8000": {
+                **probe_http_health(build_health_url(tts_url)),
+                "url": build_health_url(tts_url),
+                "port": urlparse(tts_url).port or 8000,
+            },
+            "asr_8001": {
+                **probe_http_health(build_health_url(asr_url)),
+                "url": build_health_url(asr_url),
+                "port": urlparse(asr_url).port or 8001,
+            },
+            "ffmpeg": {
+                "ok": bool(ffmpeg_path),
+                "detail": ffmpeg_path or "ffmpeg executable not found",
+                "path": ffmpeg_path,
+            },
+        }
+        checks["avatar_runtime"] = {
+            "ok": bool(avatar_runtime.is_running()),
+            "detail": "running" if avatar_runtime.is_running() else "stopped",
+        }
+        overall_ok = all(bool(item.get("ok")) for item in checks.values())
+        return {
+            "overall_status": "ok" if overall_ok else "degraded",
+            "checks": checks,
         }
 
     def create_chat_completion(self, payload):

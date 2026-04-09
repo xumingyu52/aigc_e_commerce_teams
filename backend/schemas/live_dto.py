@@ -6,6 +6,7 @@ from typing import Any
 class ChatRequest:
     text: str
     user: str = "User"
+    request_id: str = ""
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any] | None):
@@ -13,6 +14,7 @@ class ChatRequest:
         return cls(
             text=str(payload.get("text", "") or ""),
             user=str(payload.get("user", "User") or "User"),
+            request_id=str(payload.get("request_id", "") or ""),
         )
 
 

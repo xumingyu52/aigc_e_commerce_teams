@@ -60,6 +60,7 @@ type WsPayload = {
 }
 
 type LatestAudioPayload = {
+  request_id?: string
   audio?: {
     filename?: string
     mtime_ms?: number
@@ -89,6 +90,38 @@ function createMessage(user: string, message: string, type: 'system' | 'member' 
     message,
     level: style.level,
     color: style.color,
+  }
+}
+
+function createClientRequestId() {
+  return `live-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function summarizeForLog(value: string, limit = 48) {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  return compact.length > limit ? `${compact.slice(0, limit)}...` : compact
+}
+
+function logClientTrace(stage: string, payload: Record<string, unknown>) {
+  console.info('[live-trace]', {
+    module: 'live_frontend',
+    stage,
+    ...payload,
+  })
+}
+
+function getAsrErrorMessage(errorCode?: string) {
+  switch (errorCode) {
+    case 'ffmpeg_missing':
+      return 'ASR 依赖缺失，请检查 ffmpeg'
+    case 'provider_unreachable':
+      return 'ASR 服务不可达，请检查 8001'
+    case 'provider_error':
+      return 'ASR 服务返回异常'
+    case 'empty_text':
+      return '未识别到有效语音'
+    default:
+      return 'ASR 失败，请稍后再试'
   }
 }
 
@@ -132,6 +165,10 @@ export default function LivePage() {
   const lipSyncFrameRef = useRef<number | null>(null)
   const mouthOpenRef = useRef(0)
   const manualStopRef = useRef(false)
+  const activeTraceRequestIdRef = useRef('')
+  const isAudioPollingRef = useRef(false)
+  const activeAudioPollSinceRef = useRef(0)
+  const activeAudioPollTokenRef = useRef(0)
 
   const [activeTab, setActiveTab] = useState<LiveTab>('chat')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -437,35 +474,73 @@ export default function LivePage() {
       return
     }
 
+    if (isAudioPollingRef.current && activeAudioPollSinceRef.current === since) {
+      return
+    }
+
     const requestId = Date.now()
+    const traceRequestId = activeTraceRequestIdRef.current || createClientRequestId()
+    const pollToken = Date.now() + Math.floor(Math.random() * 1000)
     latestAudioRequestRef.current = requestId
+    activeAudioPollSinceRef.current = since
+    activeAudioPollTokenRef.current = pollToken
+    isAudioPollingRef.current = true
+    logClientTrace('latest_audio_poll', {
+      request_id: traceRequestId,
+      status: 'start',
+      since,
+    })
 
     for (let attempt = 0; attempt < 10; attempt += 1) {
+      if (activeAudioPollTokenRef.current !== pollToken) {
+        return
+      }
       try {
-        const response = await fetch(`${getApiBaseUrl()}/api/latest-audio?since=${since}`)
+        const response = await fetch(`${getApiBaseUrl()}/api/latest-audio?since=${since}&request_id=${encodeURIComponent(traceRequestId)}`)
         if (response.ok) {
           const payload = (await response.json()) as LatestAudioPayload
+          const effectiveRequestId = payload.request_id || traceRequestId
           const audio = payload.audio
           if (audio?.url) {
             if (latestAudioRequestRef.current !== requestId) {
               return
             }
+            isAudioPollingRef.current = false
 
             const audioKey = `${audio.filename ?? ''}:${audio.mtime_ms ?? ''}`
             if (audioKey && lastPlayedAudioKeyRef.current === audioKey) {
               return
             }
 
+            logClientTrace('latest_audio_poll', {
+              request_id: effectiveRequestId,
+              status: 'hit',
+              since,
+              attempt: attempt + 1,
+              filename: audio?.filename || '',
+              mtime_ms: audio?.mtime_ms || '',
+            })
+
             stopNativeAudio()
             const player = new window.Audio(`${getApiBaseUrl()}${audio.url}?t=${audio.mtime_ms ?? Date.now()}`)
             audioPlayerRef.current = player
             lastPlayedAudioKeyRef.current = audioKey
             player.onplay = () => {
+              logClientTrace('audio_play', {
+                request_id: effectiveRequestId,
+                status: 'playing',
+                filename: audio.filename || '',
+              })
               setIsPlayingAudio(true)
               startLipSync(player)
               pulseSpeakingState(3200)
             }
             player.onended = () => {
+              logClientTrace('audio_play', {
+                request_id: effectiveRequestId,
+                status: 'ended',
+                filename: audio.filename || '',
+              })
               setIsPlayingAudio(false)
               audioPlayerRef.current = null
               stopLipSync()
@@ -474,6 +549,12 @@ export default function LivePage() {
               }
             }
             player.onerror = () => {
+              logClientTrace('audio_play', {
+                request_id: effectiveRequestId,
+                status: 'error',
+                filename: audio.filename || '',
+                error: 'audio_element_error',
+              })
               setIsPlayingAudio(false)
               audioPlayerRef.current = null
               stopLipSync()
@@ -484,6 +565,12 @@ export default function LivePage() {
             try {
               await player.play()
             } catch (error) {
+              logClientTrace('audio_play', {
+                request_id: effectiveRequestId,
+                status: 'blocked',
+                filename: audio.filename || '',
+                error: error instanceof Error ? error.message : 'autoplay_blocked',
+              })
               setIsPlayingAudio(false)
               audioPlayerRef.current = null
               stopLipSync()
@@ -500,11 +587,29 @@ export default function LivePage() {
             return
           }
         }
-      } catch {
+      } catch (error) {
+        isAudioPollingRef.current = false
+        logClientTrace('latest_audio_poll', {
+          request_id: traceRequestId,
+          status: 'error',
+          since,
+          attempt: attempt + 1,
+          error: error instanceof Error ? error.message : 'latest_audio_failed',
+        })
         // Keep polling while the backend finishes writing the sample file.
+        return
       }
 
       await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+
+    if (activeAudioPollTokenRef.current === pollToken) {
+      isAudioPollingRef.current = false
+      logClientTrace('latest_audio_poll', {
+        request_id: traceRequestId,
+        status: 'timeout',
+        since,
+      })
     }
   })
 
@@ -533,6 +638,11 @@ export default function LivePage() {
 
     if (typeof data.panelMsg === 'string') {
       const nextMessage = data.panelMsg.trim()
+      logClientTrace('ws_panel_msg', {
+        request_id: activeTraceRequestIdRef.current || '',
+        status: 'ok',
+        message_preview: summarizeForLog(nextMessage),
+      })
       setPanelMessage(nextMessage || '待机中')
       if (!nextMessage) {
         enterIdleState()
@@ -552,6 +662,13 @@ export default function LivePage() {
     if (data.panelReply?.content) {
       const isAvatar = isAvatarMessageType(data.panelReply.type)
       const user = data.panelReply.username || (isAvatar ? 'Avatar' : DEFAULT_USER)
+      logClientTrace('ws_panel_reply', {
+        request_id: activeTraceRequestIdRef.current || '',
+        status: 'ok',
+        reply_type: data.panelReply.type || '',
+        text_len: data.panelReply.content.length,
+        text_preview: summarizeForLog(data.panelReply.content),
+      })
       appendChatMessage(createMessage(user, data.panelReply.content, isAvatar ? 'avatar' : 'member'))
       if (isAvatar) {
         pulseSpeakingState()
@@ -626,11 +743,12 @@ export default function LivePage() {
     }
   })
 
-  const postJson = useEvent(async (path: string, body?: Record<string, unknown>) => {
+  const postJson = useEvent(async (path: string, body?: Record<string, unknown>, requestId?: string) => {
     const response = await fetch(`${getApiBaseUrl()}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(requestId ? { 'X-Request-Id': requestId } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
     })
@@ -675,20 +793,40 @@ export default function LivePage() {
     }
 
     setIsSending(true)
+    const requestId = createClientRequestId()
+    activeTraceRequestIdRef.current = requestId
     lastInteractionAtRef.current = Date.now()
     appendChatMessage(createMessage(DEFAULT_USER, text, 'member'))
     setPanelMessage('消息已提交，等待数字人响应...')
+    logClientTrace('chat_submit', {
+      request_id: requestId,
+      status: 'start',
+      text_len: text.length,
+      text_preview: summarizeForLog(text),
+    })
 
     try {
-      await postJson('/api/chat', {
+      const response = await postJson('/api/chat', {
         user: DEFAULT_USER,
         text,
+      }, requestId)
+      const payload = (await response.json()) as { request_id?: string }
+      const effectiveRequestId = payload.request_id || requestId
+      activeTraceRequestIdRef.current = effectiveRequestId
+      logClientTrace('chat_submit', {
+        request_id: effectiveRequestId,
+        status: 'ok',
       })
       setInputMessage('')
       void fetchMessageHistory()
       void pollLatestAudio(lastInteractionAtRef.current)
       startReplySync(lastInteractionAtRef.current)
-    } catch {
+    } catch (error) {
+      logClientTrace('chat_submit', {
+        request_id: requestId,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'chat_failed',
+      })
       appendChatMessage(createMessage('系统通知', '消息发送失败，请检查后端服务。', 'system'))
       setPanelMessage('消息发送失败')
     } finally {
@@ -699,6 +837,13 @@ export default function LivePage() {
   const transcribeRecordedAudio = useEvent(async (audioBlob: Blob) => {
     setIsTranscribing(true)
     setPanelMessage('正在进行 ASR 转写...')
+    const requestId = createClientRequestId()
+    logClientTrace('asr_submit', {
+      request_id: requestId,
+      status: 'start',
+      audio_size: audioBlob.size,
+      audio_type: audioBlob.type || 'unknown',
+    })
 
     const formData = new FormData()
     formData.append('file', audioBlob, 'live-recording.webm')
@@ -706,14 +851,33 @@ export default function LivePage() {
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/asr`, {
         method: 'POST',
+        headers: {
+          'X-Request-Id': requestId,
+        },
         body: formData,
       })
-      const payload = (await response.json()) as { text?: string; detail?: string; error?: string }
+      const payload = (await response.json()) as { text?: string; detail?: string; error?: string; error_code?: string; request_id?: string }
+      const effectiveRequestId = payload.request_id || requestId
       if (!response.ok) {
-        throw new Error(payload.detail || payload.error || 'ASR failed')
+        const message = getAsrErrorMessage(payload.error_code || payload.error)
+        logClientTrace('asr_submit', {
+          request_id: effectiveRequestId,
+          status: 'error',
+          error: payload.error_code || payload.error || 'asr_failed',
+          detail: payload.detail || '',
+        })
+        setPanelMessage(message)
+        enterIdleState()
+        return
       }
 
       const transcript = (payload.text || '').trim()
+      logClientTrace('asr_submit', {
+        request_id: effectiveRequestId,
+        status: transcript ? 'ok' : 'empty',
+        text_len: transcript.length,
+        text_preview: summarizeForLog(transcript),
+      })
       if (!transcript) {
         setPanelMessage('未识别到有效语音')
         enterIdleState()
@@ -722,8 +886,13 @@ export default function LivePage() {
 
       setInputMessage(transcript)
       await submitInteractionText(transcript)
-    } catch {
-      setPanelMessage('ASR 失败，请稍后再试')
+    } catch (error) {
+      logClientTrace('asr_submit', {
+        request_id: requestId,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'asr_failed',
+      })
+      setPanelMessage(getAsrErrorMessage())
       enterIdleState()
     } finally {
       setIsTranscribing(false)

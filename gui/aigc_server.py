@@ -70,6 +70,39 @@ from gui.ai_tools_task_result_utils import (
     merge_saved_video_result,
 )
 from backend.services.live_service import live_service
+from utils.trace_utils import summarize_text, trace_log
+
+_API_LATEST_AUDIO_MISS_COUNT = 0
+
+
+def _trace_latest_audio_api(payload, since, request_id):
+    global _API_LATEST_AUDIO_MISS_COUNT
+
+    debug_enabled = os.getenv("LIVE_AUDIO_POLL_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    audio = payload.get("audio") if isinstance(payload, dict) else None
+    if isinstance(audio, dict) and audio.get("filename"):
+        _API_LATEST_AUDIO_MISS_COUNT = 0
+        trace_log(
+            module="aigc_server",
+            stage="api_latest_audio",
+            status="ok",
+            request_id=request_id,
+            since=since,
+            filename=audio.get("filename", ""),
+            mtime_ms=audio.get("mtime_ms", ""),
+        )
+        return
+
+    _API_LATEST_AUDIO_MISS_COUNT += 1
+    if debug_enabled or _API_LATEST_AUDIO_MISS_COUNT == 1 or _API_LATEST_AUDIO_MISS_COUNT % 10 == 0:
+        trace_log(
+            module="aigc_server",
+            stage="api_latest_audio",
+            status="empty",
+            request_id=request_id,
+            since=since,
+            miss_count=_API_LATEST_AUDIO_MISS_COUNT,
+        )
 
 # 初始化Flask并配置一些基本设置
 app = Flask(__name__, static_url_path="/static")  # 指定静态文件的URL路径为/static
@@ -2394,13 +2427,46 @@ def api_get_member_list():
 
 @app.route("/api/chat", methods=["post"])
 def api_chat():
-    payload, status = live_service.submit_chat(request.get_json(force=True))
+    incoming_request_id = request.headers.get("X-Request-Id", "")
+    trace_log(
+        module="aigc_server",
+        stage="api_chat",
+        status="received",
+        request_id=incoming_request_id,
+        text_len=len(str((request.get_json(silent=True) or {}).get("text", "") or "")),
+        text_preview=summarize_text((request.get_json(silent=True) or {}).get("text", "")),
+    )
+    payload, status = live_service.submit_chat(request.get_json(force=True), request_id=incoming_request_id)
+    trace_log(
+        module="aigc_server",
+        stage="api_chat",
+        status="ok" if status < 400 else "error",
+        request_id=payload.get("request_id", incoming_request_id),
+        error="" if status < 400 else summarize_text(payload.get("error")),
+        http_status=status,
+    )
     return jsonify(payload), status
 
 
 @app.route("/api/asr", methods=["post"])
 def api_asr():
-    payload, status = live_service.transcribe_audio(request.files.get("file"))
+    incoming_request_id = request.headers.get("X-Request-Id", "")
+    trace_log(
+        module="aigc_server",
+        stage="api_asr",
+        status="received",
+        request_id=incoming_request_id,
+        filename=getattr(request.files.get("file"), "filename", ""),
+    )
+    payload, status = live_service.transcribe_audio(request.files.get("file"), request_id=incoming_request_id)
+    trace_log(
+        module="aigc_server",
+        stage="api_asr",
+        status="ok" if status < 400 else "error",
+        request_id=payload.get("request_id", incoming_request_id),
+        error="" if status < 400 else summarize_text(payload.get("error") or payload.get("detail")),
+        http_status=status,
+    )
     return jsonify(payload), status
 
 
@@ -2412,12 +2478,27 @@ def serve_audio(filename):
 @app.route("/api/latest-audio")
 def api_latest_audio():
     since = request.args.get("since", type=int)
-    return jsonify(live_service.get_latest_audio(since))
+    incoming_request_id = request.headers.get("X-Request-Id", "") or request.args.get("request_id", "")
+    payload = live_service.get_latest_audio(since, request_id=incoming_request_id)
+    _trace_latest_audio_api(payload, since, payload.get("request_id", incoming_request_id))
+    return jsonify(payload)
 
 
 @app.route("/api/ws-status")
 def ws_status():
     return jsonify(live_service.get_ws_status())
+
+
+@app.route("/api/health/live")
+def api_live_health():
+    payload = live_service.get_live_health()
+    trace_log(
+        module="aigc_server",
+        stage="api_live_health",
+        status=payload.get("overall_status", "unknown"),
+        request_id=request.headers.get("X-Request-Id", "") or "-",
+    )
+    return jsonify(payload)
 
 
 @app.route("/v1/chat/completions", methods=["post"])

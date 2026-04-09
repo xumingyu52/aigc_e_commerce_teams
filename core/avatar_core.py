@@ -30,6 +30,7 @@ from llm import nlp_langchain
 from llm import nlp_ollama_api
 from llm import nlp_coze
 from core import member_db
+from utils.trace_utils import summarize_text, trace_log
 import threading
 import functools
 import traceback  # 确保导入
@@ -77,9 +78,10 @@ modules = {
 
 
 # 大语言模型回复
-def handle_chat_message(msg, username='User'):
+def handle_chat_message(msg, username='User', request_id=''):
     text = ''
     textlist = []
+    started_at = time.perf_counter()
     try:
         util.printInfo(1, username, '自然语言处理...')
         tm = time.time()
@@ -102,9 +104,29 @@ def handle_chat_message(msg, username='User'):
             text = '哎呀，你这么说我也不懂，详细点呗'
     except BaseException as e:
         print(e)
+        trace_log(
+            module="avatar",
+            stage="nlp_exception",
+            status="error",
+            request_id=request_id,
+            error=summarize_text(e),
+            time_cost=(time.perf_counter() - started_at) * 1000,
+            user=username,
+        )
         util.printInfo(1, username, '自然语言处理错误！')
         text = '哎呀，你这么说我也不懂，详细点呗'
 
+    trace_log(
+        module="avatar",
+        stage="nlp",
+        status="ok" if text else "error",
+        request_id=request_id,
+        time_cost=(time.perf_counter() - started_at) * 1000,
+        user=username,
+        provider="nlp_" + str(cfg.key_chat_module),
+        text_len=len(text),
+        text_preview=summarize_text(text),
+    )
     return text, textlist
 
 
@@ -146,6 +168,16 @@ class FeiFei:
             try:
                 index = interact.interact_type
                 if index == 1:  # 语音文字交互
+                    request_id = interact.data.get("request_id", "")
+                    trace_log(
+                        module="avatar",
+                        stage="on_interact",
+                        status="ok",
+                        request_id=request_id,
+                        user=interact.data.get("user", "User"),
+                        text_len=len(str(interact.data.get("msg", "") or "")),
+                        text_preview=summarize_text(interact.data.get("msg", "")),
+                    )
                     # 记录用户问题,方便obs等调用
                     self.write_to_file("./logs", "asr_result.txt", interact.data["msg"])
 
@@ -183,7 +215,7 @@ class FeiFei:
                             content = {'Topic': 'Unreal', 'Data': {'Key': 'log', 'Value': "思考中..."},
                                        'Username': username, 'robot': f'http://{cfg.backend_api_url}/robot/Thinking.jpg'}
                             wsa_server.get_instance().add_cmd(content)
-                        text, textlist = handle_chat_message(interact.data["msg"], username)
+                        text, textlist = handle_chat_message(interact.data["msg"], username, request_id=request_id)
 
                         qa_service.QAService().record_qapair(interact.data["msg"], text)  # 沟通记录缓存到qa文件
                     else:
@@ -192,6 +224,15 @@ class FeiFei:
                     # 记录回复
                     self.write_to_file("./logs", "answer_result.txt", text)
                     content_db.new_instance().add_content('avatar', 'speak', text, username, uid)
+                    trace_log(
+                        module="avatar",
+                        stage="reply_ready",
+                        status="ok",
+                        request_id=request_id,
+                        user=username,
+                        text_len=len(text),
+                        text_preview=summarize_text(text),
+                    )
 
                     # 文字输出：面板、聊天窗、log、数字人
                     if wsa_server.get_web_instance().is_connected(username):
@@ -455,37 +496,109 @@ class FeiFei:
     # 合成声音
     def say(self, interact, text):
         try:
+            request_id = interact.data.get("request_id", "")
+            started_at = time.perf_counter()
             result = None
+            tts_error_code = ""
+            tts_error_detail = ""
             text = "" if text is None else str(text)
             audio_url = interact.data.get('audio')  # 透传的音频
             if audio_url is not None:
                 file_name = 'sample-' + str(int(time.time() * 1000)) + '.wav'
                 result = self.download_wav(audio_url, './samples/', file_name)
+                trace_log(
+                    module="avatar",
+                    stage="audio_passthrough",
+                    status="ok" if result else "error",
+                    request_id=request_id,
+                    time_cost=(time.perf_counter() - started_at) * 1000,
+                    user=interact.data.get("user"),
+                    filename=os.path.basename(result) if result else "",
+                    audio_url=summarize_text(audio_url),
+                )
             elif config_util.config["interact"]["playSound"] or wsa_server.get_instance().is_connected(
                     interact.data.get("user")) or self.__is_send_remote_device_audio(interact):  # tts
                 util.printInfo(1, interact.data.get('user'), '合成音频...')
                 tm = time.time()
                 sp = self.__get_tts_speech()
                 try:
-                    result = sp.to_sample(text.replace("*", ""), self.__get_mood_voice())
+                    trace_log(
+                        module="avatar",
+                        stage="tts_start",
+                        status="ok",
+                        request_id=request_id,
+                        user=interact.data.get("user"),
+                        provider=type(sp).__module__ + "." + type(sp).__name__,
+                        text_len=len(text),
+                        text_preview=summarize_text(text),
+                    )
+                    result = sp.to_sample(text.replace("*", ""), self.__get_mood_voice(), request_id=request_id)
+                    tts_error_code = getattr(sp, "last_error_code", "")
+                    tts_error_detail = getattr(sp, "last_error_detail", "")
                 except AttributeError as ae:
                     util.log(1, f"[AVATAR-CORE] TTS 实例缺少 to_sample: {ae}")
                     traceback.print_exc()
+                    trace_log(
+                        module="avatar",
+                        stage="tts_call",
+                        status="error",
+                        request_id=request_id,
+                        error=summarize_text(ae),
+                        time_cost=(time.perf_counter() - started_at) * 1000,
+                        user=interact.data.get("user"),
+                    )
                     result = None
                 except Exception as e:
                     util.log(1, f"[AVATAR-CORE] to_sample 异常: {e}")
                     traceback.print_exc()
+                    trace_log(
+                        module="avatar",
+                        stage="tts_call",
+                        status="error",
+                        request_id=request_id,
+                        error=summarize_text(e),
+                        time_cost=(time.perf_counter() - started_at) * 1000,
+                        user=interact.data.get("user"),
+                    )
                     result = None
                 util.printInfo(1, interact.data.get('user'),
                                '合成音频完成. 耗时: {} ms 文件:{}'.format(math.floor((time.time() - tm) * 1000),
                                                                           result))
 
             if result is not None:
+                trace_log(
+                    module="avatar",
+                    stage="tts_result",
+                    status="ok",
+                    request_id=request_id,
+                    time_cost=(time.perf_counter() - started_at) * 1000,
+                    user=interact.data.get("user"),
+                    filename=os.path.basename(result),
+                    text_len=len(text),
+                )
                 MyThread(target=self.__process_output_audio, args=[result, interact, text]).start()
                 return result
             else:
+                trace_log(
+                    module="avatar",
+                    stage="tts_result",
+                    status="error",
+                    request_id=request_id,
+                    time_cost=(time.perf_counter() - started_at) * 1000,
+                    user=interact.data.get("user"),
+                    error=tts_error_code or "audio_not_generated",
+                    detail=summarize_text(tts_error_detail),
+                    text_len=len(text),
+                )
                 if wsa_server.get_web_instance().is_connected(interact.data.get('user')):
-                    wsa_server.get_web_instance().add_cmd({"panelMsg": "", 'Username': interact.data.get('user'),
+                    panel_msg = ""
+                    if tts_error_code == "provider_unreachable":
+                        panel_msg = "语音服务不可达"
+                    elif tts_error_code == "provider_error":
+                        panel_msg = "语音服务返回异常"
+                    elif tts_error_code == "empty_audio":
+                        panel_msg = "语音生成为空"
+                    wsa_server.get_web_instance().add_cmd({"panelMsg": panel_msg, 'Username': interact.data.get('user'),
                                                            'robot': f'http://{cfg.backend_api_url}/robot/Normal.jpg'})
                 # 使用广播发送给所有连接的客户端
                 content = {'Topic': 'Unreal', 'Data': {'Key': 'log', 'Value': ''},
@@ -494,6 +607,14 @@ class FeiFei:
                 wsa_server.get_instance().add_cmd(content)
         except Exception as e:
             print(f"[AVATAR-CORE] say error: {e}")
+            trace_log(
+                module="avatar",
+                stage="say",
+                status="error",
+                request_id=interact.data.get("request_id", ""),
+                error=summarize_text(e),
+                user=interact.data.get("user"),
+            )
             traceback.print_exc()  # 打印完整堆栈
 
     # 下载wav
