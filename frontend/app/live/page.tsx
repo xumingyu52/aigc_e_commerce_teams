@@ -120,11 +120,12 @@ function createMessage(
   }
 }
 
-function buildHistoryMessageId(item: HistoryMessageItem, kind: 'member' | 'avatar') {
+function buildHistoryMessageId(item: HistoryMessageItem, kind: 'member' | 'avatar', index: number) {
   const username = item.username || (kind === 'avatar' ? 'Avatar' : DEFAULT_USER)
   const timePart = item.createtime || item.timetext || 'no-time'
   const content = (item.content || '').trim()
-  return `${kind}|${username}|${timePart}|${content}`
+  const uidPart = typeof item.uid === 'number' ? item.uid : 'no-uid'
+  return `${kind}|${username}|${uidPart}|${timePart}|${index}|${content}`
 }
 
 function createClientRequestId() {
@@ -144,9 +145,6 @@ function logClientTrace(stage: string, payload: Record<string, unknown>) {
   })
 }
 
-function normalizeProductName(value: string | undefined) {
-  return (value || '').replace(/\s+/g, '').trim().toLowerCase()
-}
 function formatProductPrice(value: string | number | undefined) {
   if (typeof value === 'number') {
     return `CNY ${value}`
@@ -167,29 +165,6 @@ function buildProductPreviewUrl(product: Product, ossDomain?: string | null) {
   )
 }
 
-function buildProductIntroText(product: Product) {
-  const detailParts: string[] = []
-  const normalizedPrice = formatProductPrice(product.price)
-
-  detailParts.push(`请用自然、简洁、适合直播口播的中文介绍商品“${product.name}”。`)
-  detailParts.push(`这款商品的价格是 ${normalizedPrice}。`)
-
-  if (typeof product.description === 'string' && product.description.trim()) {
-    detailParts.push(`可以参考这段商品描述：${product.description.trim()}。`)
-  }
-
-  const features =
-    Array.isArray(product.features)
-      ? product.features
-      : String(product.features || '').split(/[，,、]/).filter(Boolean)
-
-  if (features.length > 0) {
-    detailParts.push(`可以自然带出这些卖点：${features.slice(0, 4).join('、')}。`)
-  }
-
-  detailParts.push('请直接输出一小段成品中文介绍，不要解释提示词，也不要输出英文。')
-  return detailParts.join('')
-}
 function getAsrErrorMessage(errorCode?: string) {
   switch (errorCode) {
     case 'ffmpeg_missing':
@@ -292,25 +267,6 @@ export default function LivePage() {
       category,
       products,
     }))
-  }, [liveProducts])
-
-  const productNameIndex = useMemo(() => {
-    const exactMatches = new Map<string, Product[]>()
-
-    for (const product of liveProducts) {
-      const normalizedName = normalizeProductName(product.name)
-      if (!normalizedName) {
-        continue
-      }
-      const matchedProducts = exactMatches.get(normalizedName)
-      if (matchedProducts) {
-        matchedProducts.push(product)
-      } else {
-        exactMatches.set(normalizedName, [product])
-      }
-    }
-
-    return exactMatches
   }, [liveProducts])
 
   const getApiBaseUrl = useEvent(() => {
@@ -617,13 +573,13 @@ export default function LivePage() {
         return
       }
       const history = payload.list
-        .map((item) => {
+        .map((item, index) => {
           const kind = isAvatarMessageType(item.type) ? 'avatar' : 'member'
           return createMessage(
             item.username || (kind === 'avatar' ? 'Avatar' : DEFAULT_USER),
             item.content || '',
             kind,
-            buildHistoryMessageId(item, kind),
+            buildHistoryMessageId(item, kind, index),
           )
         })
         .filter((item) => item.message.trim().length > 0)
@@ -971,69 +927,6 @@ export default function LivePage() {
     }
   })
 
-  const resolveProductIntroRequest = useEvent((rawText: string) => {
-    const text = rawText.trim()
-    if (!text) {
-      return { resolvedText: '', handled: false }
-    }
-
-    const genericMatch = text.match(/^介绍一下(?:已有的|现有的)?商品[。！!？?]*$/)
-    if (genericMatch) {
-      const defaultProduct = groupedProducts[0]?.products[0] ?? null
-      if (!defaultProduct) {
-        return {
-          resolvedText: null,
-          handled: true,
-          errorMessage: '当前商品面板里还没有可介绍的商品，请先确认商品库数据是否已加载。',
-        }
-      }
-
-      return {
-        resolvedText: buildProductIntroText(defaultProduct),
-        handled: true,
-      }
-    }
-
-    const namedMatch = text.match(/^介绍一下(.+?)商品[。！!？?]*$/)
-    if (!namedMatch) {
-      return { resolvedText: text, handled: false }
-    }
-
-    const keyword = normalizeProductName(namedMatch[1])
-    if (!keyword) {
-      return { resolvedText: text, handled: false }
-    }
-
-    const exactMatches = productNameIndex.get(keyword) ?? []
-    let matchedProduct: Product | null = exactMatches.length === 1 ? exactMatches[0] : null
-
-    if (!matchedProduct) {
-      const fuzzyMatches = liveProducts.filter((product) => normalizeProductName(product.name).includes(keyword))
-      if (fuzzyMatches.length === 1) {
-        matchedProduct = fuzzyMatches[0]
-      } else if (fuzzyMatches.length > 1) {
-        return {
-          resolvedText: null,
-          handled: true,
-          errorMessage: '匹配到多个商品，请把商品名说得更完整一些。',
-        }
-      }
-    }
-
-    if (!matchedProduct) {
-      return {
-        resolvedText: null,
-        handled: true,
-        errorMessage: `没有找到名称包含"${namedMatch[1].trim()}"的商品，请先确认商品库里已有该商品。`,
-      }
-    }
-
-    return {
-      resolvedText: buildProductIntroText(matchedProduct),
-      handled: true,
-    }
-  })
-
   const submitInteractionText = useEvent(async (rawText: string) => {
     const text = rawText.trim()
     if (!text || isSending) {
@@ -1193,15 +1086,7 @@ export default function LivePage() {
   })
 
   const handleSendMessage = useEvent(async () => {
-    const result = resolveProductIntroRequest(inputMessage)
-    if (result.handled && !result.resolvedText) {
-      const message = result.errorMessage || '商品介绍请求暂时无法处理，请稍后重试。'
-      appendChatMessage(createMessage('系统通知', message, 'system'))
-      setPanelMessage(message)
-      return
-    }
-
-    await submitInteractionText(result.resolvedText ?? inputMessage)
+    await submitInteractionText(inputMessage)
   })
 
   const handleToggleRecording = useEvent(async () => {
