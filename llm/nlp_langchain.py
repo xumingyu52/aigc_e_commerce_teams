@@ -1,5 +1,6 @@
 import hashlib
 import os
+import time
 
 from langchain.document_loaders import PyPDFLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -67,8 +68,8 @@ def load_index(index_name):
 
 def add_text_to_index(text, metadata, index_name="knowledge_data"):
     """
-    将用户的最佳文案存入向量库
-    :param text: 文案内容
+    将文本内容存入向量库
+    :param text: 内容
     :param metadata: 元数据
     :param index_name: 索引名称
     """
@@ -80,22 +81,18 @@ def add_text_to_index(text, metadata, index_name="knowledge_data"):
 
         index_path = get_index_path(index_name)
         embedding = OpenAIEmbeddings(model="text-embedding-ada-002")
-        # 使用 Chroma 存入文本
         vectordb = Chroma(persist_directory=index_path, embedding_function=embedding)
         vectordb.add_texts(texts=[text], metadatas=[metadata])
         vectordb.persist()
-        util.log(1, f"已成功将新偏好记录存入 RAG 库: {metadata.get('product_name', '未知商品')}")
         return True
     except Exception as e:
         util.log(1, f"存入 RAG 库失败: {e}")
         return False
 
-def get_similar_texts(query, user_id=None, index_name="knowledge_data", k=3):
+def get_similar_texts(query, user_id=None, source=None, index_name="knowledge_data", k=3):
     """
-    根据当前需求，检索出相似的历史最佳文案作为参考
-    :param query: 搜索词
-    :param user_id: 用户唯一标识，用于过滤个人偏好
-    :param k: 检索数量
+    根据当前需求，检索出相似的历史背景或偏好要求
+    source: 指定来源
     """
     try:
         os.environ['OPENAI_API_KEY'] = cfg.key_gpt_api_key
@@ -104,13 +101,20 @@ def get_similar_texts(query, user_id=None, index_name="knowledge_data", k=3):
         embedding = OpenAIEmbeddings(model="text-embedding-ada-002")
         vectordb = Chroma(persist_directory=index_path, embedding_function=embedding)
 
-        # 构建过滤器
+
         filter_dict = {}
         if user_id:
             filter_dict['user_id'] = user_id
+        if source:
+            filter_dict['source'] = source
 
-        # 搜索最相似的 K 条记录
-        results = vectordb.similarity_search(query, k=k, filter=filter_dict if filter_dict else None)
+        search_filter = None
+        if len(filter_dict) > 1:
+            search_filter = {"$and": [{k: v} for k, v in filter_dict.items()]}
+        elif len(filter_dict) == 1:
+            search_filter = filter_dict
+
+        results = vectordb.similarity_search(query, k=k, filter=search_filter)
         return [doc.page_content for doc in results]
     except Exception as e:
         util.log(1, f"检索 RAG 库失败: {e}")
@@ -124,25 +128,66 @@ def save_all():
     load_all_pdfs(folder_path)
 
 
-def generate_prompt(question):
+def generate_prompt(question, context_data=""):
     context = "你是数字人Fay。你的知识不仅来源于所给到的文本知识，还包括经过深度学习的广泛数据集。"
     instruction = "在回答问题时，展现你的智能就像是从你的全面知识库中提取答案，而非依赖于所给到的文本知识来源。"
     creative_instruction = "不要在回答中表明'根据所提供的文本信息'，你需要表现得如同这些答案是你独立思考的结果。"
     complexity_handling = "当面对复杂问题时，以一种理解深刻且透彻的方式回答，确保答案的深度和广度。"
-    info = f"{context}\n{instruction}\n{creative_instruction}\n{complexity_handling}\n问题：{question}\n回答："
+    
+    # 商家检索到的历史规则上下文
+    rag_context = ""
+    if context_data:
+        rag_context = f"\n以下是商家对你的特殊要求，请在回答中严格遵守：\n{context_data}\n"
+
+    # 自省指令：单次调用实现自我记忆
+    memory_instruction = "\n【重要】：如果商家在对话中提出了新的核心要求、工作规矩或长期偏好，请在你的回答末尾另起一行，以 [MEMORY: 要求的总结] 的格式标注出来。如果没有则不标注。\n"
+
+    info = f"{context}\n{rag_context}\n{instruction}\n{creative_instruction}\n{complexity_handling}\n{memory_instruction}\n问题：{question}\n回答："
     return info
 
 def question(cont, uid=0):
+    """
+    Fay 交互核心：单次调用实现回答与记忆同步
+    """
     try:
+        os.environ['OPENAI_API_KEY'] = cfg.key_gpt_api_key
+        os.environ['OPENAI_API_BASE'] = cfg.gpt_base_url
+        if cfg.proxy_config != None:
+            os.environ["OPENAI_PROXY"] = cfg.proxy_config
+            
+        # 1. 同步索引
         save_all()
-        info = generate_prompt(cont)
+
+        # 2. 检索历史记忆
+        requirements = get_similar_texts(cont, user_id=uid, source='merchant_requirement', k=3)
+        req_context = "\n".join([f"- {r}" for r in requirements]) if requirements else ""
+
+        # 3. 构建 Prompt
+        info = generate_prompt(cont, context_data=req_context)
+
+        # 4. 执行检索回答
         index = load_index(index_name)    
         llm = ChatOpenAI(model="gpt-3.5-turbo-16k")
         ans = index.query(info, llm, chain_type="map_reduce")
+
+        # 5. 回复后处理：剥离并存储动态记忆
+        if "[MEMORY:" in ans:
+            import re
+            match = re.search(r'\[MEMORY:\s*(.*?)\]', ans)
+            if match:
+                summary = match.group(1).strip()
+                add_text_to_index(summary, {
+                    'user_id': uid,
+                    'timestamp': str(time.time()),
+                    'source': 'merchant_requirement'
+                })
+                util.log(1, f"Fay 已自动识别并存入新要求: {summary}")
+                
+            # 清理掉标签，不让终端用户看到
+            ans = re.sub(r'\n?\[MEMORY:.*?\]', '', ans).strip()
+
         return ans
     except Exception as e:
-        util.log(1, f"请求失败: {e}")
+        util.log(1, f"Fay 请求处理失败: {e}")
         return "抱歉，我现在太忙了，休息一会，请稍后再试。"
-    
-
-
+        
