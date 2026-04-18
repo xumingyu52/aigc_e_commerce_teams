@@ -1,9 +1,13 @@
 'use client'
 
-import React, { startTransition, useEffect, useRef, useState } from 'react'
+import React, { startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import PendulumClock from '@/components/widgets/PendulumClock'
 import MinimalClock from '@/components/widgets/MinimalClock'
 import NeonStrips, { useNeonState } from '@/components/widgets/NeonStrips'
+import { fetchProductLibrary } from '@/lib/oss/api'
+import { buildOssAssetUrl, fetchRuntimeOssDomain, resolveOssCustomDomain } from '@/lib/oss/shared'
+import type { Product } from '@/lib/types/product'
+import { computeLipSyncDelay, computeMouthForm, normalizeMouthOpen, smoothTowards } from '@/live2d/lipSync'
 import './live.css'
 
 let PIXI: typeof import('pixi.js') | null = null
@@ -11,6 +15,7 @@ let Live2DModel: typeof import('pixi-live2d-display/cubism4').Live2DModel | null
 
 type CubismWindow = Window & {
   Live2DCubismCore?: unknown
+  PIXI?: typeof import('pixi.js')
 }
 
 type Live2DModelWithTicker = typeof import('pixi-live2d-display/cubism4').Live2DModel & {
@@ -22,24 +27,69 @@ type InteractiveLive2DModel = import('pixi-live2d-display/cubism4').Live2DModel 
   motion: (name: string) => void
 }
 
+type Live2DCoreModelController = {
+  setParameterValueById: (id: string, value: number) => void
+}
+
+type StageReadyModel = import('pixi-live2d-display/cubism4').Live2DModel & {
+  internalModel?: {
+    coreModel?: Live2DCoreModelController
+  }
+}
+
 type LiveTab = 'chat' | 'product'
 type LiveStage = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'offline'
 
 type ChatMessage = {
+  id: string
   user: string
   message: string
   level: string
   color: string
 }
 
+type HistoryMessageItem = {
+  type?: string
+  content?: string
+  username?: string
+  createtime?: string
+  timetext?: string
+  uid?: number
+}
+
 type PanelReply = {
-  type?: 'member' | 'fay' | string
+  type?: 'member' | 'avatar' | 'assistant' | string
   content?: string
   username?: string
   uid?: number
 }
 
+type MouthCue = {
+  offset_ms: number
+  ts_ms?: number
+  start_ms?: number
+  end_ms?: number
+  phoneme?: string
+  mouth_open: number
+  mouth_form?: number
+  energy?: number
+}
+
+type MouthSyncPayload = {
+  request_id?: string
+  frame_ms?: number
+  duration_ms?: number
+  source?: string
+  cues?: MouthCue[]
+}
+
 type WsPayload = {
+  type?: string
+  timestamp?: number
+  mouth_open?: number
+  rms?: number
+  short_energy?: number
+  request_id?: string
   panelMsg?: string
   panelReply?: PanelReply
   is_connect?: boolean
@@ -49,34 +99,117 @@ type WsPayload = {
 }
 
 type LatestAudioPayload = {
+  request_id?: string
   audio?: {
     filename?: string
     mtime_ms?: number
     url?: string
+    mouth_sync?: MouthSyncPayload
   } | null
+}
+
+type PendingAudio = {
+  src: string
+  key: string
+}
+
+type ProductGroup = {
+  category: string
+  products: Product[]
 }
 
 const DEFAULT_USER = 'User'
 const MAX_CHAT_MESSAGES = 80
+const LEGACY_AVATAR_MESSAGE_TYPES = new Set(['avatar', 'assistant', 'fay'])
 
 const SPEAKER_STYLES: Record<string, { level: string; color: string }> = {
   system: { level: 'SYS', color: '#ff4d4f' },
   member: { level: 'UL5', color: '#00aeec' },
-  fay: { level: 'AI', color: '#7c3aed' },
+  avatar: { level: 'AI', color: '#7c3aed' },
 }
 
 function trimMessages(messages: ChatMessage[]) {
   return messages.slice(-MAX_CHAT_MESSAGES)
 }
 
-function createMessage(user: string, message: string, type: 'system' | 'member' | 'fay'): ChatMessage {
+function createMessage(
+  user: string,
+  message: string,
+  type: 'system' | 'member' | 'avatar',
+  id?: string,
+): ChatMessage {
   const style = SPEAKER_STYLES[type]
   return {
+    id: id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     user,
     message,
     level: style.level,
     color: style.color,
   }
+}
+
+function buildHistoryMessageId(item: HistoryMessageItem, kind: 'member' | 'avatar', index: number) {
+  const username = item.username || (kind === 'avatar' ? 'Avatar' : DEFAULT_USER)
+  const timePart = item.createtime || item.timetext || 'no-time'
+  const content = (item.content || '').trim()
+  const uidPart = typeof item.uid === 'number' ? item.uid : 'no-uid'
+  return `${kind}|${username}|${uidPart}|${timePart}|${index}|${content}`
+}
+
+function createClientRequestId() {
+  return `live-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function summarizeForLog(value: string, limit = 48) {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  return compact.length > limit ? `${compact.slice(0, limit)}...` : compact
+}
+
+function logClientTrace(stage: string, payload: Record<string, unknown>) {
+  console.info('[live-trace]', {
+    module: 'live_frontend',
+    stage,
+    ...payload,
+  })
+}
+
+function formatProductPrice(value: string | number | undefined) {
+  if (typeof value === 'number') {
+    return `CNY ${value}`
+  }
+
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return 'CNY --'
+  }
+
+  return /^(cny|rmb|¥|\$)/i.test(normalized) ? normalized : `CNY ${normalized}`
+}
+
+function buildProductPreviewUrl(product: Product, ossDomain?: string | null) {
+  return (
+    buildOssAssetUrl(product.main_image, ossDomain) ||
+    buildOssAssetUrl(product.images?.[0], ossDomain)
+  )
+}
+
+function getAsrErrorMessage(errorCode?: string) {
+  switch (errorCode) {
+    case 'ffmpeg_missing':
+      return 'ASR 依赖缺失，请检查 ffmpeg'
+    case 'provider_unreachable':
+      return 'ASR 服务不可达，请检查 8001'
+    case 'provider_error':
+      return 'ASR 服务返回异常'
+    case 'empty_text':
+      return '未识别到有效语音'
+    default:
+      return 'ASR 失败，请稍后再试'
+  }
+}
+
+function isAvatarMessageType(type?: string) {
+  return typeof type === 'string' && LEGACY_AVATAR_MESSAGE_TYPES.has(type)
 }
 
 function useEvent<T extends (...args: never[]) => unknown>(callback: T): T {
@@ -91,7 +224,10 @@ function useEvent<T extends (...args: never[]) => unknown>(callback: T): T {
 
 export default function LivePage() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const chatListRef = useRef<HTMLDivElement>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
   const websocketRef = useRef<WebSocket | null>(null)
+  const activeSocketIdRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const audioPulseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -102,13 +238,33 @@ export default function LivePage() {
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
   const latestAudioRequestRef = useRef(0)
   const lastPlayedAudioKeyRef = useRef('')
+  const replySyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const recentMessageKeysRef = useRef<string[]>([])
+  const live2dModelRef = useRef<StageReadyModel | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const analyserDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null)
+  const audioSourceRef = useRef<MediaElementAudioSourceNode | null>(null)
+  const lipSyncFrameRef = useRef<number | null>(null)
+  const mouthTweenFrameRef = useRef<number | null>(null)
+  const timedMouthFrameRef = useRef<number | null>(null)
+  const wsLipSyncDeadlineRef = useRef(0)
+  const mouthOpenRef = useRef(0)
+  const mouthFormRef = useRef(0)
+  const mouthTargetOpenRef = useRef(0)
+  const mouthTargetFormRef = useRef(0)
+  const manualStopRef = useRef(false)
+  const activeTraceRequestIdRef = useRef('')
+  const isAudioPollingRef = useRef(false)
+  const activeAudioPollSinceRef = useRef(0)
+  const activeAudioPollTokenRef = useRef(0)
 
   const [activeTab, setActiveTab] = useState<LiveTab>('chat')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    createMessage('系统通知', '直播页已接入现有 Fay 服务链路。', 'system'),
+    createMessage('系统通知', 'Live 页面已接入当前 Live2D 服务链路。', 'system'),
   ])
   const [inputMessage, setInputMessage] = useState('')
-  const [panelMessage, setPanelMessage] = useState('待机中')
+  const [panelMessage, setPanelMessage] = useState('待命中')
   const [stageStatus, setStageStatus] = useState<LiveStage>('offline')
   const [liveState, setLiveState] = useState<number>(0)
   const [isHumanConnected, setIsHumanConnected] = useState(false)
@@ -117,8 +273,45 @@ export default function LivePage() {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [isPlayingAudio, setIsPlayingAudio] = useState(false)
+  const [pendingAudio, setPendingAudio] = useState<PendingAudio | null>(null)
+  const [liveProducts, setLiveProducts] = useState<Product[]>([])
+  const [liveProductsLoading, setLiveProductsLoading] = useState(false)
+  const [liveProductsError, setLiveProductsError] = useState('')
+  const [ossCustomDomain, setOssCustomDomain] = useState<string | null>(null)
 
   const { state: neonState, audioLevel, setState: setNeonState, setAudioLevel } = useNeonState()
+  const deviceRuntimeLabel = isHumanConnected ? '数字人设备已连接' : '数字人设备未连接'
+  const remoteAudioLabel = remoteAudioConnected ? '远端设备音频已连接' : '远端设备音频未连接'
+  const browserAudioLabel = isPlayingAudio ? '浏览器音频播放中' : '浏览器音频空闲'
+  const hostTopic =
+    stageStatus === 'thinking'
+      ? '数字人正在整理话术与回复内容'
+      : stageStatus === 'speaking'
+        ? '数字人正在讲解商品与回复用户问题'
+        : stageStatus === 'listening'
+          ? '数字人正在监听麦克风与等待输入'
+          : liveState === 1
+            ? '检测到当前直播服务正在运行'
+            : '使用提示：启动数字人后将自动对接当前服务链路'
+
+  const groupedProducts = useMemo<ProductGroup[]>(() => {
+    const groups = new Map<string, Product[]>()
+
+    for (const product of liveProducts) {
+      const category = String(product.category || '').trim() || 'Uncategorized'
+      const categoryProducts = groups.get(category)
+      if (categoryProducts) {
+        categoryProducts.push(product)
+      } else {
+        groups.set(category, [product])
+      }
+    }
+
+    return Array.from(groups.entries()).map(([category, products]) => ({
+      category,
+      products,
+    }))
+  }, [liveProducts])
 
   const getApiBaseUrl = useEvent(() => {
     if (typeof window === 'undefined') {
@@ -143,8 +336,222 @@ export default function LivePage() {
     setAudioLevel(0)
   })
 
+  const stopReplySync = useEvent(() => {
+    if (replySyncTimerRef.current) {
+      clearInterval(replySyncTimerRef.current)
+      replySyncTimerRef.current = null
+    }
+  })
+
+  const stopMouthTween = useEvent(() => {
+    if (mouthTweenFrameRef.current) {
+      cancelAnimationFrame(mouthTweenFrameRef.current)
+      mouthTweenFrameRef.current = null
+    }
+  })
+
+  const stopTimedMouthSync = useEvent(() => {
+    if (timedMouthFrameRef.current) {
+      cancelAnimationFrame(timedMouthFrameRef.current)
+      timedMouthFrameRef.current = null
+    }
+  })
+
+  const applyMouthPose = useEvent((openY: number, mouthForm: number) => {
+    const normalizedOpenY = Math.max(0, Math.min(1, openY))
+    const normalizedForm = Math.max(-1, Math.min(1, mouthForm))
+    mouthOpenRef.current = normalizedOpenY
+    mouthFormRef.current = normalizedForm
+
+    const coreModel = live2dModelRef.current?.internalModel?.coreModel
+    if (!coreModel) {
+      return
+    }
+
+    coreModel.setParameterValueById('ParamMouthOpenY', normalizedOpenY)
+    coreModel.setParameterValueById('ParamMouthForm', normalizedForm)
+  })
+
+  const smoothMouthValue = useEvent((current: number, target: number, alpha: number, epsilon = 0.0015) => {
+    return smoothTowards(current, target, alpha, epsilon)
+  })
+
+  const startMouthTween = useEvent(() => {
+    if (mouthTweenFrameRef.current) {
+      return
+    }
+
+    const tick = () => {
+      const nextOpen = smoothMouthValue(mouthOpenRef.current, mouthTargetOpenRef.current, 0.28)
+    const nextForm = smoothMouthValue(mouthFormRef.current, mouthTargetFormRef.current, 0.24)
+
+      applyMouthPose(nextOpen, nextForm)
+
+      const openSettled = Math.abs(nextOpen - mouthTargetOpenRef.current) <= 0.0015
+      const formSettled = Math.abs(nextForm - mouthTargetFormRef.current) <= 0.0015
+
+      if (openSettled && formSettled) {
+        mouthTweenFrameRef.current = null
+        return
+      }
+
+      mouthTweenFrameRef.current = requestAnimationFrame(tick)
+    }
+
+    mouthTweenFrameRef.current = requestAnimationFrame(tick)
+  })
+
+  const setMouthTargets = useEvent((openY: number, mouthForm = 0) => {
+    mouthTargetOpenRef.current = Math.max(0, Math.min(1, openY))
+    mouthTargetFormRef.current = Math.max(-1, Math.min(1, mouthForm))
+    startMouthTween()
+  })
+
+  const resetMouthImmediately = useEvent((openY = 0, mouthForm = 0) => {
+    stopMouthTween()
+    mouthTargetOpenRef.current = Math.max(0, Math.min(1, openY))
+    mouthTargetFormRef.current = Math.max(-1, Math.min(1, mouthForm))
+    applyMouthPose(mouthTargetOpenRef.current, mouthTargetFormRef.current)
+  })
+
+  const stopLipSync = useEvent(() => {
+    if (lipSyncFrameRef.current) {
+      cancelAnimationFrame(lipSyncFrameRef.current)
+      lipSyncFrameRef.current = null
+    }
+    stopTimedMouthSync()
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.disconnect()
+      } catch {
+        // Ignore disconnect failures during teardown.
+      }
+      audioSourceRef.current = null
+    }
+    if (analyserRef.current) {
+      try {
+        analyserRef.current.disconnect()
+      } catch {
+        // Ignore disconnect failures during teardown.
+      }
+      analyserRef.current = null
+    }
+    if (audioContextRef.current) {
+      void audioContextRef.current.close().catch(() => undefined)
+      audioContextRef.current = null
+    }
+    analyserDataRef.current = null
+    setMouthTargets(0, 0)
+  })
+
+  const startTimedMouthSync = useEvent((
+    player: HTMLAudioElement,
+    mouthSync?: MouthSyncPayload,
+  ) => {
+    const cues = mouthSync?.cues
+    if (!cues?.length) {
+      startLipSync(player)
+      return
+    }
+
+    stopLipSync()
+
+    const tick = () => {
+      const currentPlayer = audioPlayerRef.current
+      if (!currentPlayer || currentPlayer !== player) {
+        timedMouthFrameRef.current = null
+        return
+      }
+
+      const currentMs = Math.max(0, player.currentTime * 1000)
+      if (wsLipSyncDeadlineRef.current > Date.now()) {
+        timedMouthFrameRef.current = requestAnimationFrame(tick)
+        return
+      }
+      let activeCue = cues[0]
+      for (let i = 0; i < cues.length; i += 1) {
+        if (cues[i].offset_ms <= currentMs) {
+          activeCue = cues[i]
+        } else {
+          break
+        }
+      }
+
+    const cueOpen = activeCue.mouth_open ?? 0
+    setMouthTargets(cueOpen, activeCue.mouth_form ?? computeMouthForm(cueOpen))
+
+      if (!player.paused && !player.ended) {
+        timedMouthFrameRef.current = requestAnimationFrame(tick)
+        return
+      }
+
+      timedMouthFrameRef.current = null
+    }
+
+    timedMouthFrameRef.current = requestAnimationFrame(tick)
+  })
+
+  const startLipSync = useEvent((player: HTMLAudioElement) => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const AudioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextCtor) {
+      return
+    }
+
+    stopLipSync()
+
+    try {
+      const context = new AudioContextCtor()
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.72
+
+      const source = context.createMediaElementSource(player)
+      source.connect(analyser)
+      analyser.connect(context.destination)
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      audioContextRef.current = context
+      analyserRef.current = analyser
+      analyserDataRef.current = dataArray
+      audioSourceRef.current = source
+
+      const tick = () => {
+        const activeAnalyser = analyserRef.current
+        const activeData = analyserDataRef.current
+        if (!activeAnalyser || !activeData) {
+          return
+        }
+
+        activeAnalyser.getByteFrequencyData(activeData)
+        let sum = 0
+        for (let i = 0; i < activeData.length; i += 1) {
+          sum += activeData[i]
+        }
+
+        const average = sum / activeData.length / 255
+        const targetOpen = average < 0.03 ? 0 : Math.min(1, average * 2.8)
+        const targetForm = computeMouthForm(targetOpen)
+        setMouthTargets(targetOpen, targetForm)
+        lipSyncFrameRef.current = requestAnimationFrame(tick)
+      }
+
+      if (context.state === 'suspended') {
+        void context.resume().catch(() => undefined)
+      }
+      tick()
+    } catch {
+      resetMouthImmediately(0, 0)
+    }
+  })
+
   const stopNativeAudio = useEvent(() => {
+    latestAudioRequestRef.current = -1
     const player = audioPlayerRef.current
+    stopLipSync()
     if (player) {
       player.pause()
       player.currentTime = 0
@@ -152,6 +559,91 @@ export default function LivePage() {
     }
     setIsPlayingAudio(false)
   })
+
+  const playAudioTrack = useEvent(
+    async (
+      src: string,
+      audioKey: string,
+      trace: {
+        request_id?: string
+        filename?: string
+        mouthSync?: MouthSyncPayload
+      } = {},
+    ) => {
+      stopNativeAudio()
+      const player = new window.Audio()
+      player.crossOrigin = 'anonymous'
+      player.src = src
+      audioPlayerRef.current = player
+      lastPlayedAudioKeyRef.current = audioKey
+      setPendingAudio(null)
+
+      player.onplay = () => {
+        logClientTrace('audio_play', {
+          request_id: trace.request_id || '',
+          status: 'playing',
+          filename: trace.filename || '',
+        })
+        setIsPlayingAudio(true)
+        setPendingAudio(null)
+        startTimedMouthSync(player, trace.mouthSync)
+        pulseSpeakingState(3200)
+      }
+
+      player.onended = () => {
+        logClientTrace('audio_play', {
+          request_id: trace.request_id || '',
+          status: 'ended',
+          filename: trace.filename || '',
+        })
+        setIsPlayingAudio(false)
+        audioPlayerRef.current = null
+        stopLipSync()
+        if (stageStatus !== 'thinking' && stageStatus !== 'listening') {
+          enterIdleState()
+        }
+      }
+
+      player.onerror = () => {
+        logClientTrace('audio_play', {
+          request_id: trace.request_id || '',
+          status: 'error',
+          filename: trace.filename || '',
+          error: 'audio_element_error',
+        })
+        setIsPlayingAudio(false)
+        audioPlayerRef.current = null
+        stopLipSync()
+        setPendingAudio({ src, key: audioKey })
+        setPanelMessage('音频文件已生成，但浏览器播放失败')
+        appendChatMessage(createMessage('系统通知', '音频文件已生成，但浏览器未能播放，请点击“播放最新语音”重试。', 'system'))
+      }
+
+      try {
+        await player.play()
+      } catch (error) {
+        logClientTrace('audio_play', {
+          request_id: trace.request_id || '',
+          status: 'blocked',
+          filename: trace.filename || '',
+          error: error instanceof Error ? error.message : 'autoplay_blocked',
+        })
+        setIsPlayingAudio(false)
+        audioPlayerRef.current = null
+        stopLipSync()
+        setPendingAudio({ src, key: audioKey })
+        setPanelMessage('音频已生成，但浏览器阻止了自动播放')
+        appendChatMessage(
+          createMessage(
+            '系统通知',
+            '音频已生成，但浏览器阻止了自动播放。请点击“播放最新语音”继续播放。',
+            'system',
+          ),
+        )
+        console.error('Audio autoplay failed', error)
+      }
+    },
+  )
 
   const releaseMicrophone = useEvent(() => {
     mediaRecorderRef.current = null
@@ -194,9 +686,38 @@ export default function LivePage() {
   })
 
   const appendChatMessage = useEvent((message: ChatMessage) => {
+    const messageKey = `${message.level}|${message.user}|${message.message.trim()}`
+    if (recentMessageKeysRef.current.includes(messageKey)) {
+      return
+    }
+    recentMessageKeysRef.current = [...recentMessageKeysRef.current.slice(-30), messageKey]
     startTransition(() => {
       setChatMessages((prev) => trimMessages([...prev, message]))
     })
+  })
+
+  const startReplySync = useEvent((since: number) => {
+    stopReplySync()
+    let attempts = 0
+    replySyncTimerRef.current = setInterval(() => {
+      attempts += 1
+      void fetchMessageHistory()
+      void pollLatestAudio(since)
+      if (attempts >= 12) {
+        stopReplySync()
+      }
+    }, 1500)
+  })
+
+  const scrollChatToBottom = useEvent((behavior: ScrollBehavior = 'smooth') => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior, block: 'end' })
+      return
+    }
+    const list = chatListRef.current
+    if (list) {
+      list.scrollTo({ top: list.scrollHeight, behavior })
+    }
   })
 
   const fetchMessageHistory = useEvent(async () => {
@@ -211,20 +732,45 @@ export default function LivePage() {
       if (!response.ok) {
         return
       }
-      const payload = (await response.json()) as { list?: Array<{ type?: string; content?: string; username?: string }> }
+      const payload = (await response.json()) as { list?: HistoryMessageItem[] }
       if (!payload.list?.length) {
         return
       }
       const history = payload.list
-        .map((item) => {
-          const kind = item.type === 'fay' ? 'fay' : 'member'
-          return createMessage(item.username || (kind === 'fay' ? 'Fay' : DEFAULT_USER), item.content || '', kind)
+        .map((item, index) => {
+          const kind = isAvatarMessageType(item.type) ? 'avatar' : 'member'
+          return createMessage(
+            item.username || (kind === 'avatar' ? 'Avatar' : DEFAULT_USER),
+            item.content || '',
+            kind,
+            buildHistoryMessageId(item, kind, index),
+          )
         })
         .filter((item) => item.message.trim().length > 0)
       if (!history.length) {
         return
       }
-      setChatMessages(trimMessages(history))
+      recentMessageKeysRef.current = history
+        .slice(-30)
+        .map((item) => `${item.level}|${item.user}|${item.message.trim()}`)
+      setChatMessages((prev) => {
+        const nextMessages = trimMessages(history)
+        if (
+          prev.length === nextMessages.length &&
+          prev.every((item, index) =>
+            item.id === nextMessages[index]?.id &&
+            item.message === nextMessages[index]?.message &&
+            item.user === nextMessages[index]?.user &&
+            item.level === nextMessages[index]?.level,
+          )
+        ) {
+          return prev
+        }
+        return nextMessages
+      })
+      requestAnimationFrame(() => {
+        scrollChatToBottom('auto')
+      })
     } catch {
       // Keep the page usable even if history loading fails.
     }
@@ -237,22 +783,55 @@ export default function LivePage() {
         return
       }
       const payload = (await response.json()) as {
+        avatar_running?: boolean
         ui_server_running?: boolean
         human_server_running?: boolean
         human_client_connected?: boolean
       }
 
-      const running = Boolean(payload.ui_server_running && payload.human_server_running)
+      const running = Boolean(
+        payload.avatar_running || (payload.ui_server_running && payload.human_server_running),
+      )
       setLiveState(running ? 1 : 0)
       setIsHumanConnected(Boolean(payload.human_client_connected))
 
       if (running) {
+        manualStopRef.current = false
         setStageStatus('idle')
         setNeonState('idle')
-        setPanelMessage('检测到现有直播服务正在运行')
+        setPanelMessage('检测到当前直播服务正在运行')
+      } else if (manualStopRef.current) {
+        setStageStatus('offline')
+        setNeonState('idle')
       }
     } catch {
       // Ignore runtime status failures and rely on WebSocket reconnection.
+    }
+  })
+
+  const fetchLiveProducts = useEvent(async (signal?: AbortSignal) => {
+    setLiveProductsLoading(true)
+    setLiveProductsError('')
+
+    try {
+      const [products, runtimeDomain] = await Promise.all([
+        fetchProductLibrary(signal),
+        fetchRuntimeOssDomain(signal).catch(() => null),
+      ])
+
+      setLiveProducts(products)
+      setOssCustomDomain(resolveOssCustomDomain(runtimeDomain))
+    } catch (error) {
+      if (signal?.aborted) {
+        return
+      }
+
+      setLiveProducts([])
+      setLiveProductsError(error instanceof Error ? error.message : '加载商品数据失败，请稍后重试。')
+    } finally {
+      if (!signal?.aborted) {
+        setLiveProductsLoading(false)
+      }
     }
   })
 
@@ -261,63 +840,109 @@ export default function LivePage() {
       return
     }
 
-    const requestId = Date.now()
-    latestAudioRequestRef.current = requestId
+    if (isAudioPollingRef.current && activeAudioPollSinceRef.current === since) {
+      return
+    }
 
-    for (let attempt = 0; attempt < 10; attempt += 1) {
+    const requestId = Date.now()
+    const traceRequestId = activeTraceRequestIdRef.current || createClientRequestId()
+    const pollToken = Date.now() + Math.floor(Math.random() * 1000)
+    latestAudioRequestRef.current = requestId
+    activeAudioPollSinceRef.current = since
+    activeAudioPollTokenRef.current = pollToken
+    isAudioPollingRef.current = true
+    logClientTrace('latest_audio_poll', {
+      request_id: traceRequestId,
+      status: 'start',
+      since,
+    })
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (activeAudioPollTokenRef.current !== pollToken) {
+        return
+      }
       try {
-        const response = await fetch(`${getApiBaseUrl()}/api/latest-audio?since=${since}`)
+        const response = await fetch(`${getApiBaseUrl()}/api/latest-audio?since=${since}&request_id=${encodeURIComponent(traceRequestId)}`)
         if (response.ok) {
           const payload = (await response.json()) as LatestAudioPayload
+          const effectiveRequestId = payload.request_id || traceRequestId
           const audio = payload.audio
           if (audio?.url) {
             if (latestAudioRequestRef.current !== requestId) {
               return
             }
+            isAudioPollingRef.current = false
 
             const audioKey = `${audio.filename ?? ''}:${audio.mtime_ms ?? ''}`
             if (audioKey && lastPlayedAudioKeyRef.current === audioKey) {
               return
             }
 
-            stopNativeAudio()
-            const player = new window.Audio(`${getApiBaseUrl()}${audio.url}?t=${audio.mtime_ms ?? Date.now()}`)
-            audioPlayerRef.current = player
-            lastPlayedAudioKeyRef.current = audioKey
-            player.onplay = () => {
-              setIsPlayingAudio(true)
-              pulseSpeakingState(3200)
-            }
-            player.onended = () => {
-              setIsPlayingAudio(false)
-              audioPlayerRef.current = null
-              if (stageStatus !== 'thinking' && stageStatus !== 'listening') {
-                enterIdleState()
-              }
-            }
-            player.onerror = () => {
-              setIsPlayingAudio(false)
-              audioPlayerRef.current = null
-            }
+            logClientTrace('latest_audio_poll', {
+              request_id: effectiveRequestId,
+              status: 'hit',
+              since,
+              attempt: attempt + 1,
+              filename: audio?.filename || '',
+              mtime_ms: audio?.mtime_ms || '',
+            })
 
-            try {
-              await player.play()
-            } catch {
-              setIsPlayingAudio(false)
-              audioPlayerRef.current = null
-            }
+            await playAudioTrack(
+              `${getApiBaseUrl()}${audio.url}?t=${audio.mtime_ms ?? Date.now()}`,
+              audioKey,
+              {
+                request_id: effectiveRequestId,
+                filename: audio.filename || '',
+                mouthSync: audio.mouth_sync,
+              },
+            )
             return
           }
         }
-      } catch {
+      } catch (error) {
+        isAudioPollingRef.current = false
+        logClientTrace('latest_audio_poll', {
+          request_id: traceRequestId,
+          status: 'error',
+          since,
+          attempt: attempt + 1,
+          error: error instanceof Error ? error.message : 'latest_audio_failed',
+        })
         // Keep polling while the backend finishes writing the sample file.
+        return
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      await new Promise((resolve) => setTimeout(resolve, 800))
+    }
+
+    if (activeAudioPollTokenRef.current === pollToken) {
+      isAudioPollingRef.current = false
+      logClientTrace('latest_audio_poll', {
+        request_id: traceRequestId,
+        status: 'timeout',
+        since,
+      })
     }
   })
 
   const handleIncomingMessage = useEvent((data: WsPayload) => {
+    if (data.type === 'lip_sync' && typeof data.mouth_open === 'number') {
+      const now = Date.now()
+      wsLipSyncDeadlineRef.current = now + 180
+      window.setTimeout(() => {
+        const mouthOpen = normalizeMouthOpen(data.mouth_open)
+        const mouthForm = computeMouthForm(mouthOpen)
+        setMouthTargets(mouthOpen, mouthForm)
+      }, computeLipSyncDelay(data.timestamp))
+      return
+    }
+
+    if (data.type === 'lip_sync_end') {
+      wsLipSyncDeadlineRef.current = 0
+      setMouthTargets(0, 0)
+      return
+    }
+
     if (typeof data.liveState === 'number') {
       setLiveState(data.liveState)
       if (data.liveState === 1 && stageStatus === 'offline') {
@@ -342,7 +967,22 @@ export default function LivePage() {
 
     if (typeof data.panelMsg === 'string') {
       const nextMessage = data.panelMsg.trim()
-      setPanelMessage(nextMessage || '待机中')
+      logClientTrace('ws_panel_msg', {
+        request_id: activeTraceRequestIdRef.current || '',
+        status: 'ok',
+        message_preview: summarizeForLog(nextMessage),
+      })
+      const compactPanelMessage =
+        !nextMessage
+          ? '待命中'
+          : nextMessage.includes('思考')
+            ? '思考中...'
+            : nextMessage.includes('聆听') || nextMessage.includes('唤醒')
+              ? '聆听中...'
+              : nextMessage.length > 24
+                ? '回复中...'
+                : nextMessage
+      setPanelMessage(compactPanelMessage)
       if (!nextMessage) {
         enterIdleState()
       } else if (nextMessage.includes('思考')) {
@@ -359,10 +999,17 @@ export default function LivePage() {
     }
 
     if (data.panelReply?.content) {
-      const isFay = data.panelReply.type === 'fay'
-      const user = data.panelReply.username || (isFay ? 'Fay' : DEFAULT_USER)
-      appendChatMessage(createMessage(user, data.panelReply.content, isFay ? 'fay' : 'member'))
-      if (isFay) {
+      const isAvatar = isAvatarMessageType(data.panelReply.type)
+      const user = data.panelReply.username || (isAvatar ? 'Avatar' : DEFAULT_USER)
+      logClientTrace('ws_panel_reply', {
+        request_id: activeTraceRequestIdRef.current || '',
+        status: 'ok',
+        reply_type: data.panelReply.type || '',
+        text_len: data.panelReply.content.length,
+        text_preview: summarizeForLog(data.panelReply.content),
+      })
+      appendChatMessage(createMessage(user, data.panelReply.content, isAvatar ? 'avatar' : 'member'))
+      if (isAvatar) {
         pulseSpeakingState()
         if (lastInteractionAtRef.current > 0) {
           void pollLatestAudio(lastInteractionAtRef.current)
@@ -372,6 +1019,9 @@ export default function LivePage() {
   })
 
   const connectWebSocket = useEvent(() => {
+    if (manualStopRef.current) {
+      return
+    }
     const existingSocket = websocketRef.current
     if (existingSocket && (existingSocket.readyState === WebSocket.OPEN || existingSocket.readyState === WebSocket.CONNECTING)) {
       return
@@ -379,9 +1029,15 @@ export default function LivePage() {
 
     setStageStatus((prev) => (prev === 'offline' ? 'connecting' : prev))
     const socket = new WebSocket(getWsUrl())
+    const socketId = Date.now() + Math.floor(Math.random() * 1000)
+    activeSocketIdRef.current = socketId
     websocketRef.current = socket
 
     socket.onopen = () => {
+      if (activeSocketIdRef.current !== socketId) {
+        socket.close()
+        return
+      }
       setStageStatus(liveState === 1 ? 'idle' : 'connecting')
       setPanelMessage(liveState === 1 ? '已连接面板服务' : '面板已连接，等待直播启动')
       socket.send(JSON.stringify({ Username: DEFAULT_USER }))
@@ -389,6 +1045,9 @@ export default function LivePage() {
     }
 
     socket.onmessage = (event) => {
+      if (activeSocketIdRef.current !== socketId) {
+        return
+      }
       try {
         handleIncomingMessage(JSON.parse(event.data) as WsPayload)
       } catch {
@@ -397,12 +1056,22 @@ export default function LivePage() {
     }
 
     socket.onclose = () => {
-      websocketRef.current = null
+      if (activeSocketIdRef.current === socketId) {
+        websocketRef.current = null
+      }
       stopAudioPulse()
-      setStageStatus((prev) => (liveState === 1 ? 'connecting' : prev === 'offline' ? 'offline' : 'connecting'))
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
       }
+      if (activeSocketIdRef.current !== socketId) {
+        return
+      }
+      if (manualStopRef.current) {
+        setStageStatus('offline')
+        setNeonState('idle')
+        return
+      }
+      setStageStatus((prev) => (liveState === 1 ? 'connecting' : prev === 'offline' ? 'offline' : 'connecting'))
       reconnectTimerRef.current = setTimeout(() => {
         connectWebSocket()
       }, 3000)
@@ -413,11 +1082,12 @@ export default function LivePage() {
     }
   })
 
-  const postJson = useEvent(async (path: string, body?: Record<string, unknown>) => {
+  const postJson = useEvent(async (path: string, body?: Record<string, unknown>, requestId?: string) => {
     const response = await fetch(`${getApiBaseUrl()}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(requestId ? { 'X-Request-Id': requestId } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
     })
@@ -427,27 +1097,75 @@ export default function LivePage() {
     return response
   })
 
+  const ensureLiveReady = useEvent(async () => {
+    if (liveState === 1) {
+      return true
+    }
+
+    manualStopRef.current = false
+    setStageStatus('connecting')
+    setPanelMessage('正在自动启动直播服务...')
+
+    try {
+      await postJson('/api/start-live')
+      setLiveState(1)
+      setStageStatus('idle')
+      setNeonState('idle')
+      setPanelMessage('直播服务已自动启动')
+      connectWebSocket()
+      return true
+    } catch {
+      appendChatMessage(createMessage('系统通知', '直播服务尚未启动，自动启动失败，请检查后端服务。', 'system'))
+      setPanelMessage('自动启动失败，请检查后端服务')
+      setStageStatus('offline')
+      return false
+    }
+  })
+
   const submitInteractionText = useEvent(async (rawText: string) => {
     const text = rawText.trim()
     if (!text || isSending) {
       return
     }
-    if (liveState !== 1) {
-      setPanelMessage('请先启动直播服务')
+    if (!(await ensureLiveReady())) {
       return
     }
 
     setIsSending(true)
+    const requestId = createClientRequestId()
+    activeTraceRequestIdRef.current = requestId
     lastInteractionAtRef.current = Date.now()
-    setPanelMessage('消息已提交，等待 Fay 响应...')
+    appendChatMessage(createMessage(DEFAULT_USER, text, 'member'))
+    setPanelMessage('消息已提交，等待数字人响应...')
+    logClientTrace('chat_submit', {
+      request_id: requestId,
+      status: 'start',
+      text_len: text.length,
+      text_preview: summarizeForLog(text),
+    })
 
     try {
-      await postJson('/api/chat', {
+      const response = await postJson('/api/chat', {
         user: DEFAULT_USER,
         text,
+      }, requestId)
+      const payload = (await response.json()) as { request_id?: string }
+      const effectiveRequestId = payload.request_id || requestId
+      activeTraceRequestIdRef.current = effectiveRequestId
+      logClientTrace('chat_submit', {
+        request_id: effectiveRequestId,
+        status: 'ok',
       })
       setInputMessage('')
-    } catch {
+      void fetchMessageHistory()
+      void pollLatestAudio(lastInteractionAtRef.current)
+      startReplySync(lastInteractionAtRef.current)
+    } catch (error) {
+      logClientTrace('chat_submit', {
+        request_id: requestId,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'chat_failed',
+      })
       appendChatMessage(createMessage('系统通知', '消息发送失败，请检查后端服务。', 'system'))
       setPanelMessage('消息发送失败')
     } finally {
@@ -458,6 +1176,13 @@ export default function LivePage() {
   const transcribeRecordedAudio = useEvent(async (audioBlob: Blob) => {
     setIsTranscribing(true)
     setPanelMessage('正在进行 ASR 转写...')
+    const requestId = createClientRequestId()
+    logClientTrace('asr_submit', {
+      request_id: requestId,
+      status: 'start',
+      audio_size: audioBlob.size,
+      audio_type: audioBlob.type || 'unknown',
+    })
 
     const formData = new FormData()
     formData.append('file', audioBlob, 'live-recording.webm')
@@ -465,14 +1190,33 @@ export default function LivePage() {
     try {
       const response = await fetch(`${getApiBaseUrl()}/api/asr`, {
         method: 'POST',
+        headers: {
+          'X-Request-Id': requestId,
+        },
         body: formData,
       })
-      const payload = (await response.json()) as { text?: string; detail?: string; error?: string }
+      const payload = (await response.json()) as { text?: string; detail?: string; error?: string; error_code?: string; request_id?: string }
+      const effectiveRequestId = payload.request_id || requestId
       if (!response.ok) {
-        throw new Error(payload.detail || payload.error || 'ASR failed')
+        const message = getAsrErrorMessage(payload.error_code || payload.error)
+        logClientTrace('asr_submit', {
+          request_id: effectiveRequestId,
+          status: 'error',
+          error: payload.error_code || payload.error || 'asr_failed',
+          detail: payload.detail || '',
+        })
+        setPanelMessage(message)
+        enterIdleState()
+        return
       }
 
       const transcript = (payload.text || '').trim()
+      logClientTrace('asr_submit', {
+        request_id: effectiveRequestId,
+        status: transcript ? 'ok' : 'empty',
+        text_len: transcript.length,
+        text_preview: summarizeForLog(transcript),
+      })
       if (!transcript) {
         setPanelMessage('未识别到有效语音')
         enterIdleState()
@@ -481,8 +1225,13 @@ export default function LivePage() {
 
       setInputMessage(transcript)
       await submitInteractionText(transcript)
-    } catch {
-      setPanelMessage('ASR 失败，请稍后再试')
+    } catch (error) {
+      logClientTrace('asr_submit', {
+        request_id: requestId,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'asr_failed',
+      })
+      setPanelMessage(getAsrErrorMessage())
       enterIdleState()
     } finally {
       setIsTranscribing(false)
@@ -490,6 +1239,7 @@ export default function LivePage() {
   })
 
   const handleStartLive = useEvent(async () => {
+    manualStopRef.current = false
     setStageStatus('connecting')
     setPanelMessage('正在启动直播服务...')
     try {
@@ -505,8 +1255,13 @@ export default function LivePage() {
   })
 
   const handleStopLive = useEvent(async () => {
+    manualStopRef.current = true
     setPanelMessage('正在停止直播服务...')
     try {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
       await postJson('/api/stop-live')
       setLiveState(0)
       setStageStatus('offline')
@@ -514,6 +1269,11 @@ export default function LivePage() {
       stopAudioPulse()
       stopNativeAudio()
       releaseMicrophone()
+      stopReplySync()
+      if (websocketRef.current) {
+        websocketRef.current.close()
+        websocketRef.current = null
+      }
       setPanelMessage('直播服务已停止')
     } catch {
       setPanelMessage('停止失败，请稍后重试')
@@ -535,8 +1295,7 @@ export default function LivePage() {
       return
     }
 
-    if (liveState !== 1) {
-      setPanelMessage('请先启动直播服务')
+    if (!(await ensureLiveReady())) {
       return
     }
 
@@ -623,6 +1382,7 @@ export default function LivePage() {
         if (!PIXI) {
           PIXI = await import('pixi.js')
         }
+        ;(window as CubismWindow).PIXI = PIXI
         if (!Live2DModel) {
           const live2dModule = await import('pixi-live2d-display/cubism4')
           Live2DModel = live2dModule.Live2DModel
@@ -661,15 +1421,16 @@ export default function LivePage() {
 
         model = await Live2DModel.from('/runtime/hiyori_pro_t11.model3.json')
         app.stage.addChild(model)
+        live2dModelRef.current = model as StageReadyModel
 
-        const scaleX = (containerWidth * 0.9) / model.width
-        const scaleY = (containerHeight * 0.95) / model.height
+        const scaleX = (containerWidth * 1.32) / model.width
+        const scaleY = (containerHeight * 1.62) / model.height
         const baseScale = Math.min(scaleX, scaleY)
-        const scale = baseScale * 1.3
+      const scale = baseScale * 1.63
 
         model.scale.set(scale, scale)
         model.anchor.set(0.5, 0.5)
-        model.position.set(containerWidth * 0.42, containerHeight * 0.65)
+      model.position.set(containerWidth * 0.43, containerHeight * 1.17)
 
         ;(model as InteractiveLive2DModel).on('hit', (hitAreas: string[]) => {
           if (hitAreas.includes('body')) {
@@ -687,6 +1448,9 @@ export default function LivePage() {
 
     return () => {
       clearTimeout(timer)
+      live2dModelRef.current = null
+      stopMouthTween()
+      resetMouthImmediately(0, 0)
       if (model) {
         model.destroy()
       }
@@ -705,6 +1469,7 @@ export default function LivePage() {
     connectWebSocket()
 
     return () => {
+      activeSocketIdRef.current += 1
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
       }
@@ -714,11 +1479,28 @@ export default function LivePage() {
       if (websocketRef.current) {
         websocketRef.current.close()
       }
+      stopReplySync()
       stopNativeAudio()
       releaseMicrophone()
       stopAudioPulse()
+      stopLipSync()
     }
-  }, [connectWebSocket, fetchRuntimeStatus, releaseMicrophone, stopAudioPulse, stopNativeAudio])
+  }, [connectWebSocket, fetchRuntimeStatus, releaseMicrophone, stopAudioPulse, stopLipSync, stopNativeAudio, stopReplySync])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetchLiveProducts(controller.signal)
+
+    return () => {
+      controller.abort()
+    }
+  }, [fetchLiveProducts])
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      scrollChatToBottom(chatMessages.length <= 2 ? 'auto' : 'smooth')
+    })
+  }, [chatMessages, scrollChatToBottom])
 
   const serviceLabel =
     stageStatus === 'thinking'
@@ -731,7 +1513,7 @@ export default function LivePage() {
             ? '连接中'
             : stageStatus === 'offline'
               ? '未启动'
-              : '待机中'
+              : '待命中'
 
   return (
     <div className="ecommerce-live">
@@ -758,8 +1540,8 @@ export default function LivePage() {
           <div className="host-info">
             <div className="avatar"></div>
             <div className="host-details">
-              <div className="host-name">Fay Live2D Host</div>
-              <div className="host-topic">{panelMessage}</div>
+              <div className="host-name">Live2D Host</div>
+              <div className="host-topic">{hostTopic}</div>
             </div>
             <div className="live-status">{serviceLabel}</div>
           </div>
@@ -771,12 +1553,12 @@ export default function LivePage() {
               <div className="stage-light"></div>
               <div className="brand-badge">
                 <span className="brand-icon">AI</span>
-                <span className="brand-text">Fay Runtime</span>
+                <span className="brand-text">Avatar Runtime</span>
               </div>
               <div className="product-corner">
                 <div className="corner-item">
                   <span className="corner-icon">WS</span>
-                  <span className="corner-text">{isHumanConnected ? '数字人已连接' : '数字人未连接'}</span>
+                  <span className="corner-text">{deviceRuntimeLabel}</span>
                 </div>
               </div>
             </div>
@@ -788,9 +1570,9 @@ export default function LivePage() {
               <div className="live-runtime-grid">
                 <span className="runtime-chip">服务: {liveState === 1 ? '运行中' : '未启动'}</span>
                 <span className="runtime-chip">用户: {DEFAULT_USER}</span>
-                <span className="runtime-chip">远端音频: {remoteAudioConnected ? '已连接' : '未连接'}</span>
+                <span className="runtime-chip">{remoteAudioLabel}</span>
                 <span className="runtime-chip">麦克风: {isRecording ? '录音中' : isTranscribing ? '转写中' : '待命'}</span>
-                <span className="runtime-chip">音频播放: {isPlayingAudio ? '播放中' : '空闲'}</span>
+                <span className="runtime-chip">{browserAudioLabel}</span>
               </div>
               <div className="neon-controls">
                 <button className={`neon-btn ${liveState === 1 ? 'active' : ''}`} onClick={handleStartLive}>
@@ -817,7 +1599,7 @@ export default function LivePage() {
         <div className="chat-column">
           <div className="tabs">
             <div className={`tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
-              互动聊天
+              聊天互动
             </div>
             <div className={`tab ${activeTab === 'product' ? 'active' : ''}`} onClick={() => setActiveTab('product')}>
               运行状态
@@ -826,9 +1608,9 @@ export default function LivePage() {
 
           {activeTab === 'chat' ? (
             <>
-              <div className="chat-list">
+              <div className="chat-list" ref={chatListRef}>
                 {chatMessages.map((msg, index) => (
-                  <div key={`${msg.user}-${index}-${msg.message}`} className="chat-item" style={{ animationDelay: `${index * 0.03}s` }}>
+                  <div key={msg.id} className="chat-item" style={{ animationDelay: `${index * 0.03}s` }}>
                     <div className="chat-header">
                       <span className="user-level" style={{ backgroundColor: msg.color }}>
                         {msg.level}
@@ -838,11 +1620,25 @@ export default function LivePage() {
                     <span className="chat-message">{msg.message}</span>
                   </div>
                 ))}
+                <div ref={chatEndRef} />
               </div>
               <div className="input-bar">
+                <button
+                  className={`voice-btn ${isRecording ? 'recording' : ''}`}
+                  onClick={() => void handleToggleRecording()}
+                  title={isRecording ? '停止收音' : '点击开始收音'}
+                  type="button"
+                >
+                  <svg className="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                </button>
                 <input
                   type="text"
-                  placeholder={liveState === 1 ? '输入文本，走现有 Fay NLP 链路...' : '请先启动直播服务'}
+                  placeholder={liveState === 1 ? '输入聊天内容，或直接说“介绍一下已有的商品”' : '请先启动直播服务'}
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyDown={(e) => {
@@ -861,42 +1657,46 @@ export default function LivePage() {
             </>
           ) : (
             <div className="product-list">
-              <div className="product-card">
-                <div className="product-image"></div>
-                <div className="product-info">
-                  <div className="product-name">ASR / NLP / 情感分析</div>
-                  <div className="status-copy">
-                    当前页面通过现有 Fay 后端链路触发文本互动，并消费 WebSocket 回推结果。
-                  </div>
-                  <button className="buy-btn" onClick={() => void fetchMessageHistory()}>
-                    同步历史
-                  </button>
-                </div>
-              </div>
-              <div className="product-card">
-                <div className="product-image"></div>
-                <div className="product-info">
-                  <div className="product-name">WebSocket 状态</div>
-                  <div className="status-copy">
-                    面板: {stageStatus === 'offline' ? '未连接' : '已连接'} / 数字人: {isHumanConnected ? '已连接' : '未连接'}
-                  </div>
-                  <button className="buy-btn" onClick={connectWebSocket}>
-                    重连面板
-                  </button>
-                </div>
-              </div>
-              <div className="product-card">
-                <div className="product-image"></div>
-                <div className="product-info">
-                  <div className="product-name">浏览器音频链路</div>
-                  <div className="status-copy">
-                    麦克风录音走 5000 主服务的 ASR 代理，回复音频通过原生 Audio 播放。
-                  </div>
-                  <button className="buy-btn" onClick={stopNativeAudio}>
-                    停止播放
-                  </button>
-                </div>
-              </div>
+              {liveProductsLoading ? (
+                <div className="product-panel-state">正在加载商品库...</div>
+              ) : liveProductsError ? (
+                <div className="product-panel-state error">{liveProductsError}</div>
+              ) : groupedProducts.length === 0 ? (
+                <div className="product-panel-state">商品库暂无可展示商品。</div>
+              ) : (
+                groupedProducts.map((group) => (
+                  <section className="category-section" key={group.category}>
+                    <div className="category-title">{group.category}</div>
+                    <div className="category-products">
+                      {group.products.map((product) => {
+                        const previewUrl = buildProductPreviewUrl(product, ossCustomDomain)
+
+                        return (
+                          <article className="product-card" key={String(product.id)}>
+                            <div className="product-image product-image--preview">
+                              {previewUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  alt={product.name}
+                                  className="product-image-preview"
+                                  loading="lazy"
+                                  src={previewUrl}
+                                />
+                              ) : (
+                                <span className="product-image-fallback">IMG</span>
+                              )}
+                            </div>
+                            <div className="product-info">
+                              <div className="product-name">{product.name}</div>
+                              <div className="product-price">{formatProductPrice(product.price)}</div>
+                            </div>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  </section>
+                ))
+              )}
             </div>
           )}
         </div>
@@ -904,3 +1704,4 @@ export default function LivePage() {
     </div>
   )
 }
+

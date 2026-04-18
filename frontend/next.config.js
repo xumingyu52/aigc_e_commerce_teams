@@ -77,6 +77,14 @@ const nextConfig = {
         source: "/api/products/marketing-materials/delete",
         destination: "http://localhost:5003/api/delete_marketing_materials",
       },
+      {
+        source: "/static/:path*",
+        destination: "http://localhost:5000/static/:path*",
+      },
+      {
+        source: "/api/:path*",
+        destination: "http://localhost:5000/api/:path*", // Flask backend
+      },
     ];
   },
 };

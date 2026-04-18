@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation"
 
 import MarketingHeader from "@/components/products/marketing/marketing-header"
 import MarketingTable from "@/components/products/marketing/marketing-table"
+import {
+  deleteMarketingMaterials,
+  fetchMarketingProducts,
+} from "@/lib/oss/api"
 import { buildOssAssetUrl, fetchRuntimeOssDomain, resolveOssCustomDomain } from "@/lib/oss/shared"
 import type { MarketingProduct } from "@/lib/types/marketing"
 
@@ -52,17 +56,8 @@ export default function MarketingAssetsContent() {
     setErrorMsg(null)
 
     try {
-      const response = await fetch(`${API_BASE}/get_all_marketing_products?t=${Date.now()}`, { signal })
-      if (!response.ok) {
-        throw new Error("网络请求失败，请刷新重试。")
-      }
-
-      const result = await response.json()
-      if (result.status === "success" || result.code === 200) {
-        setProducts((result.data || []) as MarketingProduct[])
-      } else {
-        throw new Error(result.message || "后端返回了异常的数据格式。")
-      }
+      const result = await fetchMarketingProducts(signal)
+      setProducts(result)
     } catch (error) {
       if (isAbortError(error)) {
         return
@@ -100,22 +95,12 @@ export default function MarketingAssetsContent() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/delete_marketing_materials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ product_name: productName }),
-      })
-
-      const result = await response.json()
-      if (result.status === "success" || result.code === 200) {
-        setDeletingItems((current) => [...current, productName])
-        window.setTimeout(() => {
-          setProducts((current) => current.filter((item) => item.product_name !== productName))
-          setDeletingItems((current) => current.filter((name) => name !== productName))
-        }, 300)
-      } else {
-        throw new Error(result.message || result.error || "删除请求被拒绝。")
-      }
+      await deleteMarketingMaterials(productName)
+      setDeletingItems((current) => [...current, productName])
+      window.setTimeout(() => {
+        setProducts((current) => current.filter((item) => item.product_name !== productName))
+        setDeletingItems((current) => current.filter((name) => name !== productName))
+      }, 300)
     } catch (error) {
       console.error("删除营销素材失败:", error)
     } finally {
@@ -128,7 +113,7 @@ export default function MarketingAssetsContent() {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col gap-6 rounded-2xl border-0 bg-[#EFEFEF] p-4 shadow-[0_4px_12px_rgba(0,0,0,0.04)] md:p-6">
+    <div className="flex h-full min-h-0 w-full flex-col gap-6 rounded-2xl border-0 bg-[#EFEFEF] p-4 shadow-[0_4px_12px_rgba(0,0,0,0.04)] dark:bg-slate-900/85 dark:shadow-[0_4px_12px_rgba(0,0,0,0.35)] md:p-6">
       <MarketingHeader />
       <MarketingTable
         products={products}

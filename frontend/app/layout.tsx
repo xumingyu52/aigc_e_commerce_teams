@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
+import Script from 'next/script'
 
 import { ThemeProvider } from '@/components/theme/theme-provider'
 import './globals.css'
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
   title: '智创电商营销系统',
   description: '基于 AIGC 的新电商数字化营销技术研究与创新应用',
   icons: {
-    icon: 'http://localhost:5000/static/images/favicon.ico',
+    icon: '/static/images/favicon.ico',
   },
 }
 
@@ -26,10 +27,13 @@ export default function RootLayout({
         <link rel="preconnect" href="https://cubism.live2d.com" />
         <link rel="dns-prefetch" href="https://cubism.live2d.com" />
         {/* 预加载 Live2D 运行时 */}
-        <link rel="preload" href="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" as="script" /> 
-        <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" async />
+        <link rel="preload" href="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" as="script" />
       </head>
       <body className={inter.className}>
+        <Script
+          src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
+          strategy="beforeInteractive"
+        />
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

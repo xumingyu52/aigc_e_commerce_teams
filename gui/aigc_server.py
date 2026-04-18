@@ -2,13 +2,9 @@ import os
 import sys
 from dotenv import load_dotenv
 from flask import redirect, url_for
-import signal
-import atexit
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-import threading
-import sqlite3
+from datetime import datetime
 from flask_caching import Cache
 import zlib
 import io
@@ -30,9 +26,6 @@ if project_root not in sys.path:
 # 导入配置工具
 from utils import config_util
 
-# 导入 TTS 相关模块 (使用 try-except 防止因缺少文件导致崩溃)
-
-
 #  导入标准库和第三方库 ---
 from flask import (
     Flask,
@@ -45,21 +38,11 @@ from flask import (
     url_for,
     Response,
     stream_with_context,
-    session,
-    make_response,
-    after_this_request,
 )
 from flask_cors import CORS
-from openai import OpenAI
 from gevent import pywsgi
-from tts import tts_voice
-from tts import qwen3
-from tts import volcano_tts
 from scheduler.thread_manager import MyThread
 from core import wsa_server
-from core import content_db
-from core import member_db
-from core.interact import Interact
 from core.task_db import Task_Db
 import fay_booter
 from llm import nlp_langchain
@@ -69,25 +52,19 @@ from http import HTTPStatus
 from urllib.parse import urlparse, unquote, urlencode
 from pathlib import PurePosixPath, Path
 import requests
-from dashscope import ImageSynthesis
-import dashscope
 from werkzeug.exceptions import HTTPException
-from werkzeug.utils import secure_filename
 import hmac
 from hashlib import sha1
 import base64
 import uuid
 import time
 import hashlib
-import urllib.parse
 import json
 import traceback
 from email.utils import parsedate_to_datetime
 from threading import Lock, Thread
 from datetime import datetime
 import oss2
-import redis
-import random
 from gui.platforms import PLATFORM_CONFIG, COST_CONFIG
 from gui.ai_tools_task_result_utils import (
     build_image_task_result,
@@ -95,6 +72,60 @@ from gui.ai_tools_task_result_utils import (
     extract_task_product_id,
     merge_saved_video_result,
 )
+from backend.services.live_service import live_service
+from backend.services.storage import (
+    build_public_url as storage_build_public_url,
+    category_index_key,
+    copy_object as storage_copy_object,
+    delete_object as storage_delete_object,
+    ensure_prefix as storage_ensure_prefix,
+    generated_asset_key,
+    generated_content_prefixes,
+    get_bucket as get_storage_bucket,
+    get_object_text as storage_get_object_text,
+    get_oss_storage_config,
+    marketing_text_key,
+    object_exists as storage_object_exists,
+    object_exists_quiet as storage_object_exists_quiet,
+    put_object as storage_put_object,
+    read_json_object,
+    temp_upload_key,
+    write_json_object,
+)
+from utils.trace_utils import summarize_text, trace_log
+
+_API_LATEST_AUDIO_MISS_COUNT = 0
+_CATEGORY_INDEX_CACHE = {}
+
+
+def _trace_latest_audio_api(payload, since, request_id):
+    global _API_LATEST_AUDIO_MISS_COUNT
+
+    debug_enabled = os.getenv("LIVE_AUDIO_POLL_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    audio = payload.get("audio") if isinstance(payload, dict) else None
+    if isinstance(audio, dict) and audio.get("filename"):
+        _API_LATEST_AUDIO_MISS_COUNT = 0
+        trace_log(
+            module="aigc_server",
+            stage="api_latest_audio",
+            status="ok",
+            request_id=request_id,
+            since=since,
+            filename=audio.get("filename", ""),
+            mtime_ms=audio.get("mtime_ms", ""),
+        )
+        return
+
+    _API_LATEST_AUDIO_MISS_COUNT += 1
+    if debug_enabled or _API_LATEST_AUDIO_MISS_COUNT == 1 or _API_LATEST_AUDIO_MISS_COUNT % 10 == 0:
+        trace_log(
+            module="aigc_server",
+            stage="api_latest_audio",
+            status="empty",
+            request_id=request_id,
+            since=since,
+            miss_count=_API_LATEST_AUDIO_MISS_COUNT,
+        )
 
 # 初始化Flask并配置一些基本设置
 app = Flask(__name__, static_url_path="/static")  # 指定静态文件的URL路径为/static
@@ -199,36 +230,6 @@ app.config["MAX_CONTENT_LENGTH"] = (
 # 创建上传目录
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ----------------- Dashboard Redirects -----------------
-
-
-@app.route("/home")
-def home():
-    return render_template("index_main.html")
-
-
-@app.route("/dashboard")
-def dashboard_redirect():
-    return redirect("http://localhost:5001/dashboard")
-
-
-@app.route("/dashboard.html")
-def dashboard_html_redirect():
-    return redirect("http://localhost:5001/dashboard.html")
-
-
-@app.route("/dashboard_internal")
-def dashboard_internal_redirect():
-    return redirect("http://localhost:5001/dashboard_internal")
-
-
-@app.route("/dashboard_internal.html")
-def dashboard_internal_html_redirect():
-    return redirect("http://localhost:5001/dashboard_internal.html")
-
-
-# ----------------- Dashboard Logic End -----------------
-
 
 @app.route("/favicon.ico")
 def favicon():
@@ -251,10 +252,6 @@ def favicon():
         return redirect(url_for("static", filename="images/kode-icon.png"))
     # 如果发生报错，也重定向到默认图标，避免图标加载不出这种情况
 
-
-@app.route("/customer_analysis")
-def customer_analysis():
-    return render_template("customer_analysis.html")
 
 
 @app.route("/api/analyze_customer", methods=["POST"])
@@ -328,8 +325,6 @@ def analyze_customer():
 
             if response.status_code == HTTPStatus.OK:
                 content = response.output.text
-                # 尝试解析 JSON
-                # 有时候模型会包裹在 ```json ... ``` 中
                 import re
 
                 json_match = re.search(r"\{[\s\S]*\}", content)
@@ -665,8 +660,7 @@ def delete_marketing_materials():
         print(f"找到商品ID: {target_product_id}，开始删除营销素材...")
 
         # 2. 删除营销素材
-        # 营销素材通常存储在 products/{id}/marketing/ 目录下
-        marketing_prefix = f"products/{target_product_id}/marketing/"
+        marketing_prefix = f"products/{target_product_id}/generated_content/"
 
         deleted_count = 0
         # 使用统一存储接口删除文件
@@ -1051,9 +1045,9 @@ def run_exe():
     # 处理POST请求
     # 获取当前文件所在目录的绝对路径
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # 构建相对路径 (从gui目录向上到aigc_e_commerce，再进入fay目录)
+    # Live2D 方案下不再依赖旧版数字人可执行程序，这里保留接口但返回迁移提示
     exe_path = os.path.normpath(
-        os.path.join(current_dir, "..", "fay", "Fay5_4_Oct.exe")
+        os.path.join(current_dir, "..", "live2d")
     )
 
     # 调用本地exe文件
@@ -1064,7 +1058,7 @@ def run_exe():
             return jsonify(
                 {
                     "msg": "error",
-                    "error_message": f"文件不存在: {exe_path}",
+                    "error_message": "当前项目已切换为 Live2D 运行链路，不再依赖旧版数字人可执行程序。",
                     "debug_info": {
                         "current_dir": current_dir,
                         "resolved_path": exe_path,
@@ -1072,16 +1066,12 @@ def run_exe():
                 }
             ), 404
 
-        # 启动程序
-        print(f"Starting executable: {exe_path}")
-        exe_dir = os.path.dirname(exe_path)
-        subprocess.Popen(exe_path, cwd=exe_dir)
-
         return jsonify(
             {
                 "msg": "success",
+                "mode": "live2d",
                 "path": exe_path,
-                "relative_path": "../fay/Fay5_4_Oct.exe",
+                "relative_path": "../live2d",
             }
         )
     except Exception as e:
@@ -1411,51 +1401,6 @@ def check_img2img_status():
         return jsonify({"code": 1, "msg": str(e), "data": None}), 500
 
 
-@app.route("/product_marketing")
-def product_marketing():
-    return render_template("product_marketing.html")
-
-
-@app.route("/setting")
-def setting():
-    config_util.load_config()
-    return render_template("setting.html", config=config_util.config)
-
-
-@app.route("/test1")
-def test1():
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-    return redirect(f"{frontend_url}/ai-tools/textgenerate")
-
-
-@app.route("/test2")  # 宣传图
-def test2():
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-    return redirect(f"{frontend_url}/ai-tools/image")
-
-
-@app.route("/test3")  # 宣传视频
-def test3():
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-    return redirect(f"{frontend_url}/ai-tools/video")
-
-
-# @app.route('/test4')  # 直播数字人
-# def test4():
-#   return render_template('test4.html')
-
-
-@app.route("/calendar")  # 日程安排
-def calendar():
-    return render_template("calendar.html")
-
-
-@app.route("/note")
-def note():
-    # 原有主页逻辑
-    return render_template("note.html")
-
-
 # 添加静态文件路由
 @app.route("/static/products/<path:filename>")
 def custom_static(filename):
@@ -1472,9 +1417,7 @@ BASE_DIR = Path(__file__).parent
 PRODUCTS_FILE = BASE_DIR / "products.csv"
 
 
-@app.route("/product_management")
-def product_management():
-    return render_template("product_management.html")
+
 
 
 # 修正后的OSS配置（支持环境变量覆盖，端点包含协议）
@@ -1493,11 +1436,12 @@ OSS_CONFIG = {
 
 @app.route("/api/runtime-config/image", methods=["GET"])
 def get_image_runtime_config():
+    storage_config = get_oss_storage_config()
     return jsonify(
         {
             "status": "success",
             "data": {
-                "oss_custom_domain": OSS_CONFIG.get("CUSTOM_DOMAIN") or "",
+                "oss_custom_domain": storage_config.custom_domain or "",
             },
         }
     )
@@ -1684,7 +1628,219 @@ def _create_oss_bucket():
     return LocalStorageBucket()
 
 
-_init_oss()
+def _extract_oss_object_key(raw_url_or_key):
+    raw = (raw_url_or_key or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return urlparse(raw).path.lstrip("/")
+    return raw.lstrip("/")
+
+
+def _iter_object_keys(local_bucket, prefix, suffixes=None):
+    normalized_suffixes = tuple(s.lower() for s in (suffixes or ()))
+    for obj in oss2.ObjectIterator(local_bucket, prefix=prefix):
+        key = obj.key
+        if key.endswith("/"):
+            continue
+        if normalized_suffixes and not key.lower().endswith(normalized_suffixes):
+            continue
+        yield key
+
+
+def _dedupe_keep_order(items):
+    seen = set()
+    ordered = []
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
+
+
+def _get_original_image_keys(local_bucket, product_id):
+    prefix = f"products/{product_id}/original_images/"
+    return list(_iter_object_keys(local_bucket, prefix, IMAGE_EXTENSIONS))
+
+
+def _get_generated_image_keys(local_bucket, product_id):
+    prefix = f"products/{product_id}/generated_content/images/"
+    return list(_iter_object_keys(local_bucket, prefix, IMAGE_EXTENSIONS))
+
+
+def _normalize_edit_image_urls(local_bucket, product_id, product_info):
+    original_keys = _get_original_image_keys(local_bucket, product_id)
+    if original_keys:
+        return [_build_oss_public_url(key) for key in original_keys]
+
+    legacy_urls = []
+    for raw_image in product_info.get("images", []):
+        if not isinstance(raw_image, str):
+            continue
+
+        key = _extract_oss_object_key(raw_image)
+        if not key:
+            continue
+
+        lowered_key = key.lower()
+        if "/generated_content/" in lowered_key or "/marketing/" in lowered_key:
+            continue
+
+        if key.startswith("products/") and local_bucket.object_exists(key):
+            legacy_urls.append(_build_oss_public_url(key))
+            continue
+
+        basename = PurePosixPath(key).name
+        if basename and basename.lower().endswith(IMAGE_EXTENSIONS):
+            candidate_key = f"products/{product_id}/original_images/{basename}"
+            if local_bucket.object_exists(candidate_key):
+                legacy_urls.append(_build_oss_public_url(candidate_key))
+                continue
+
+        if raw_image.startswith("http://") or raw_image.startswith("https://"):
+            legacy_urls.append(raw_image)
+
+    return _dedupe_keep_order(legacy_urls)
+
+
+def _resolve_main_image_key(local_bucket, product_id, product_info=None):
+    original_keys = _get_original_image_keys(local_bucket, product_id)
+    if original_keys:
+        return original_keys[0]
+
+    product_info = product_info or {}
+    for raw_image in product_info.get("images", []):
+        if not isinstance(raw_image, str):
+            continue
+
+        key = _extract_oss_object_key(raw_image)
+        if not key:
+            continue
+
+        lowered_key = key.lower()
+        if "/generated_content/" in lowered_key or "/marketing/" in lowered_key:
+            continue
+
+        if key.startswith("products/") and local_bucket.object_exists(key):
+            return key
+
+        basename = PurePosixPath(key).name
+        if basename and basename.lower().endswith(IMAGE_EXTENSIONS):
+            candidate_key = f"products/{product_id}/original_images/{basename}"
+            if local_bucket.object_exists(candidate_key):
+                return candidate_key
+
+    return None
+
+
+def _load_category_index(local_bucket, category):
+    data = read_json_object(local_bucket, category_index_key(category), default=[])
+    return data if isinstance(data, list) else []
+
+
+def _save_category_index(local_bucket, category, index_data):
+    write_json_object(
+        local_bucket, category_index_key(category), index_data, ensure_ascii=False
+    )
+
+
+def _load_index_product_info(local_bucket, product_id, info_cache=None):
+    cache = info_cache if info_cache is not None else {}
+    cache_key = str(product_id).strip()
+    if not cache_key:
+        return None
+
+    if cache_key in cache:
+        return cache[cache_key]
+
+    info_path = f"products/{cache_key}/info.json"
+    try:
+        product_info = json.loads(local_bucket.get_object(info_path).read())
+    except oss2.exceptions.NoSuchKey:
+        cache[cache_key] = None
+        return None
+    except Exception:
+        cache[cache_key] = None
+        return None
+
+    if not isinstance(product_info, dict):
+        cache[cache_key] = None
+        return None
+
+    cache[cache_key] = product_info
+    return product_info
+
+
+def _normalize_index_entry(local_bucket, category, item, info_cache=None):
+    if not isinstance(item, dict):
+        return None
+
+    product_id = str(item.get("product_id") or item.get("id") or "").strip()
+    if not product_id:
+        return None
+
+    product_info = _load_index_product_info(local_bucket, product_id, info_cache)
+    if not product_info:
+        return None
+
+    resolved_category = (
+        product_info.get("category") or item.get("category") or category or ""
+    )
+    if resolved_category != category:
+        return None
+
+    main_image_key = _resolve_main_image_key(local_bucket, product_id, product_info)
+    product_name = str(product_info.get("name") or item.get("name") or "").strip()
+    if not product_name:
+        return None
+
+    return {
+        "product_id": product_id,
+        "name": product_name,
+        "main_image": main_image_key,
+        "updated_at": product_info.get("updated_at")
+        or item.get("updated_at")
+        or datetime.now().isoformat(),
+    }
+
+
+def _migrate_category_index(local_bucket, category, info_cache=None):
+    cached_entry = _CATEGORY_INDEX_CACHE.get(category)
+    if cached_entry is not None:
+        return list(cached_entry.get("normalized_items", []))
+
+    raw_items = _load_category_index(local_bucket, category)
+
+    normalized_items = []
+    seen_product_ids = set()
+
+    for item in raw_items:
+        normalized = _normalize_index_entry(local_bucket, category, item, info_cache)
+        if not normalized:
+            continue
+        product_id = normalized["product_id"]
+        if product_id in seen_product_ids:
+            continue
+        seen_product_ids.add(product_id)
+        normalized_items.append(normalized)
+
+    persisted_items = raw_items
+    if normalized_items != raw_items:
+        _save_category_index(local_bucket, category, normalized_items)
+        persisted_items = normalized_items
+
+    _CATEGORY_INDEX_CACHE[category] = {"normalized_items": list(normalized_items)}
+    return normalized_items
+
+
+def _build_category_index_entry(local_bucket, product_id, product_data):
+    return {
+        "product_id": product_id,
+        "name": product_data["name"],
+        "main_image": _resolve_main_image_key(local_bucket, product_id, product_data),
+        "updated_at": product_data.get("updated_at") or datetime.now().isoformat(),
+    }
 
 
 def generate_product_id():
@@ -1712,21 +1868,27 @@ def save_product(product_id=None):
                 f"prod_{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:6]}"
             )
 
+        info_path = f"products/{product_id}/info.json"
+        previous_category = None
+        previous_info = read_json_object(bucket, info_path, default={}) or {}
+        if isinstance(previous_info, dict):
+            previous_category = previous_info.get("category")
+
         # 处理图片
         final_images = []
         for img_url in data.get("images", []):
             if "temp_uploads" in img_url:
-                filename = img_url.split("/")[-1]
+                source_key = _extract_oss_object_key(img_url)
+                filename = PurePosixPath(source_key).name
                 new_path = f"products/{product_id}/original_images/{filename}"
-                bucket.copy_object(
-                    OSS_CONFIG["BUCKET_NAME"],
-                    img_url.replace(f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/", ""),
+                storage_copy_object(
+                    bucket,
+                    get_oss_storage_config().bucket_name,
+                    source_key,
                     new_path,
                 )
-                bucket.delete_object(
-                    img_url.replace(f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/", "")
-                )
-                final_images.append(f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/{new_path}")
+                storage_delete_object(bucket, source_key)
+                final_images.append(storage_build_public_url(new_path))
             else:
                 final_images.append(img_url)
 
@@ -1741,13 +1903,15 @@ def save_product(product_id=None):
             "updated_at": datetime.now().isoformat(),
         }
 
-        bucket.put_object(
-            f"products/{product_id}/info.json",
-            json.dumps(product_info, ensure_ascii=False),
-        )
+        write_json_object(bucket, info_path, product_info, ensure_ascii=False)
 
         # 更新索引
-        update_product_index(product_id, product_info)
+        update_product_index(
+            bucket,
+            product_id,
+            product_info,
+            previous_category=previous_category,
+        )
 
         return jsonify(
             {"status": "success", "product_id": product_id, "product": product_info}
@@ -1767,18 +1931,19 @@ def update_product_index(product_id, product_data):
     except:
         index_data = []
 
-    index_data.append(
-        {
-            "product_id": product_id,
-            "name": product_data["name"],
-            "main_image": f"products/{product_id}/original_images/{product_data['images'][0].split('/')[-1]}"
-            if product_data.get("images")
-            else None,
-            "updated_at": datetime.now().isoformat(),
-        }
-    )
+    for category in categories:
+        _CATEGORY_INDEX_CACHE.pop(category, None)
+        index_data = _migrate_category_index(local_bucket, category)
+        index_data = [
+            item for item in index_data if item.get("product_id") != product_id
+        ]
 
-    bucket.put_object(category_index_path, json.dumps(index_data, ensure_ascii=False))
+        if not remove and product_data and category == product_data.get("category"):
+            index_data.append(
+                _build_category_index_entry(local_bucket, product_id, product_data)
+            )
+
+        _save_category_index(local_bucket, category, index_data)
 
 
 @app.route("/generate_marketing", methods=["POST"])
@@ -1946,16 +2111,29 @@ def delete_product_by_id(product_id):  # 修改函数名确保唯一性
 
         # 检查商品是否存在
         info_path = f"products/{product_id}/info.json"
-        if not bucket.object_exists(info_path):
+        if not storage_object_exists(bucket, info_path):
             return jsonify({"status": "error", "error": "商品不存在"}), 404
+
+        previous_info = read_json_object(bucket, info_path, default={}) or {}
+        previous_category = (
+            previous_info.get("category")
+            if isinstance(previous_info, dict)
+            else None
+        )
 
         # 删除商品目录
         prefix = f"products/{product_id}/"
         for obj in oss2.ObjectIterator(bucket, prefix=prefix):
-            bucket.delete_object(obj.key)
+            storage_delete_object(bucket, obj.key)
 
         # 更新索引
-        update_product_index(product_id, None, delete=True)
+        update_product_index(
+            bucket,
+            product_id,
+            None,
+            previous_category=previous_category,
+            remove=True,
+        )
 
         return jsonify({"status": "success"})
 
@@ -1970,8 +2148,10 @@ def generate_follow_up_questions(content):
     返回JSON字符串格式的问题列表，如 '["问题1", "问题2", "问题3"]'
     """
     try:
-        # 优先使用 WORKFLOW_KEY，因为我们知道它是可用的
-        api_key = os.getenv("DIFY_WORKFLOW_KEY", "app-LLqziYb1p0ySdDXKTrOa0RQt")
+        # 获取 API Key
+        api_key = os.getenv("DIFY_WORKFLOW_KEY")
+        if not api_key:
+            return {"questions": [], "error": "DIFY_WORKFLOW_KEY 未配置"}
 
         # 截断过长的内容以避免token超限
         content_snippet = content[:2000]
@@ -1994,8 +2174,9 @@ Do NOT include any examples or markdown.
 Just the JSON array.
 """
         # 使用 Dify Chat API (专门用于生成追问，比 Workflow 更灵活)
-        # Key: app-rMfQSR6zkY4OdNECHtBZP4tN
-        chat_api_key = os.getenv("DIFY_CHAT_KEY", "app-rMfQSR6zkY4OdNECHtBZP4tN")
+        chat_api_key = os.getenv("DIFY_CHAT_KEY")
+        if not chat_api_key:
+            return {"questions": [], "error": "DIFY_CHAT_KEY 未配置"}
 
         response = requests.post(
             "https://api.dify.ai/v1/chat-messages",
@@ -2063,7 +2244,10 @@ def handle_xiaohongshu():
         if "必须执行的任务" not in q:
             q = q + "\n" + instruction
 
-        api_key = os.getenv("DIFY_WORKFLOW_KEY", "app-LLqziYb1p0ySdDXKTrOa0RQt")
+        api_key = os.getenv("DIFY_WORKFLOW_KEY")
+        if not api_key:
+            return {"error": "DIFY_WORKFLOW_KEY 未配置", "content": "", "title": ""}
+
         response = requests.post(
             "https://api.dify.ai/v1/workflows/run",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -2194,9 +2378,10 @@ def handle_xiaohongshu_stream():
 
             def worker():
                 try:
-                    api_key = os.getenv(
-                        "DIFY_WORKFLOW_KEY", "app-LLqziYb1p0ySdDXKTrOa0RQt"
-                    )
+                    api_key = os.getenv("DIFY_WORKFLOW_KEY")
+                    if not api_key:
+                        print("Error: DIFY_WORKFLOW_KEY 未配置")
+                        return
                     print(f"Calling Dify API with query length: {len(q)}")  # Debug log
                     r = requests.post(
                         "https://api.dify.ai/v1/workflows/run",
@@ -2341,89 +2526,202 @@ def handle_xiaohongshu_stream():
 
 @app.route("/generate_xiaohongshu_stream_post", methods=["POST"])
 def handle_xiaohongshu_stream_post():
-    data = request.get_json()
+    """
+    文案生成统一入口
+    根据请求中的 mode 参数自动路由到营销文案或导购文案工作流
+    """
+    data = request.get_json() or {}
     q = data.get("query", "")
+    mode = data.get("mode", "marketing")
+    platform = data.get("platform", "auto")
 
     @stream_with_context
     def generate():
-        try:
-            yield 'data: {"status":"init"}\n\n'
+        def emit_sse(payload):
+            return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
-            api_key = os.getenv(
-                "DIFY_WORKFLOW_KEY", "app-LLqziYb1p0ySdDXKTrOa0RQt"
+        def normalize_stream_error(raw_error):
+            message = str(raw_error or "").strip().lower()
+
+            if not message:
+                return "生成失败：请稍后重试。"
+            if any(keyword in message for keyword in ("api key", "未配置", "not configured")):
+                return "生成失败：服务配置异常，请稍后再试。"
+            if any(
+                keyword in message
+                for keyword in ("read timed out", "timed out", "timeout", "超时")
+            ):
+                return "生成失败：服务响应超时，请稍后重试。"
+            if any(
+                keyword in message
+                for keyword in (
+                    "connection aborted",
+                    "connection reset",
+                    "connectionreseterror",
+                    "远程主机强迫关闭了一个现有的连接",
+                    "10054",
+                )
+            ):
+                return "生成失败：服务连接中断，请稍后重试。"
+            if any(
+                keyword in message
+                for keyword in ("api error", "status code", "bad gateway", "502", "503", "504")
+            ):
+                return "生成失败：服务暂时不可用，请稍后重试。"
+            return "生成失败：请稍后重试。"
+
+        def extract_output_text(outputs):
+            if not isinstance(outputs, dict):
+                return ""
+
+            for key in (
+                "text",
+                "answer",
+                "content",
+                "output",
+                "result",
+                "reply",
+                "red_content",
+            ):
+                value = outputs.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+            return ""
+
+        try:
+            yield emit_sse({"status": "init"})
+
+            api_key = (
+                os.getenv("DIFY_GUIDE_COPY_KEY")
+                if mode == "guide"
+                else os.getenv("DIFY_MARKETING_COPY_KEY")
             )
             if not api_key:
-                api_key = os.getenv("DIFY_CHAT_KEY", "app-rMfQSR6zkY4OdNECHtBZP4tN")
+                yield emit_sse(
+                    {
+                        "error": normalize_stream_error("api key not configured")
+                    }
+                )
+                return
 
-            url = "https://api.dify.ai/v1/workflows/run"
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
             payload = {
-                "inputs": {"query": q, "basic_instruction": q},
+                "inputs": {"query": q},
                 "response_mode": "streaming",
                 "user": "user-123",
             }
+            if mode != "guide":
+                payload["inputs"]["platform"] = platform
 
-            print(f"Calling Dify Workflow API with query length: {len(q)}")
+            full_content = ""
+            hashtags = ""
+            questions = []
+            saw_chunk = False
+            finished_outputs = {}
 
-            with requests.post(
-                url, headers=headers, json=payload, stream=True, timeout=60
-            ) as response:
-                if response.status_code != 200:
-                    yield f"data: {json.dumps({'error': f'API Error: {response.status_code} - {response.text}'})}\n\n"
-                    return
+            print(f"Calling Dify Workflow API [mode={mode}] with query length: {len(q)}")
 
-                full_content = ""
-                hashtags = ""
-                questions = []
+            try:
+                with requests.post(
+                    "https://api.dify.ai/v1/workflows/run",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    stream=True,
+                    timeout=60,
+                ) as response:
+                    if response.status_code != 200:
+                        yield emit_sse(
+                            {
+                                "error": normalize_stream_error(
+                                    f"api error {response.status_code}"
+                                )
+                            }
+                        )
+                        return
 
-                for line in response.iter_lines():
-                    if not line:
-                        continue
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
 
-                    decoded_line = line.decode("utf-8")
-                    if not decoded_line.startswith("data:"):
-                        continue
+                        decoded_line = line.decode("utf-8")
+                        if not decoded_line.startswith("data:"):
+                            continue
 
-                    try:
-                        json_str = decoded_line[5:]
-                        event_data = json.loads(json_str)
+                        try:
+                            event_data = json.loads(decoded_line[5:])
+                        except Exception as e:
+                            print(f"Error parsing chunk: {e}")
+                            continue
+
                         event = event_data.get("event")
+                        event_payload = event_data.get("data", {})
 
                         if event == "text_chunk":
-                            chunk = event_data.get("data", {}).get("text", "")
+                            chunk = event_payload.get("text", "")
                             if chunk:
+                                saw_chunk = True
                                 full_content += chunk
-                                yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+                                yield emit_sse({"chunk": chunk})
                         elif event == "workflow_finished":
-                            pass
+                            finished_outputs = event_payload.get("outputs", {})
+                            fallback_text = extract_output_text(finished_outputs)
+                            if fallback_text and not full_content.strip():
+                                saw_chunk = True
+                                full_content = fallback_text
+                                yield emit_sse({"chunk": fallback_text})
                         elif event == "error":
-                            yield f"data: {json.dumps({'error': event_data.get('message', 'Unknown error')}, ensure_ascii=False)}\n\n"
-                    except Exception as e:
-                        print(f"Error parsing chunk: {e}")
-                        continue
+                            yield emit_sse(
+                                {
+                                    "error": normalize_stream_error(
+                                        event_data.get(
+                                            "message", "Dify returned an unknown error"
+                                        )
+                                    )
+                                }
+                            )
+                            return
+            except requests.exceptions.Timeout as e:
+                print(f"Stream error: {e}")
+                yield emit_sse({"error": normalize_stream_error(e)})
+                return
+            except requests.exceptions.RequestException as e:
+                print(f"Stream error: {e}")
+                yield emit_sse({"error": normalize_stream_error(e)})
+                return
 
-                try:
-                    import re
+            if not full_content.strip():
+                fallback_text = extract_output_text(finished_outputs)
+                if fallback_text:
+                    saw_chunk = True
+                    full_content = fallback_text
+                    yield emit_sse({"chunk": fallback_text})
+                elif not saw_chunk:
+                    yield emit_sse({"error": "生成失败：本次未返回可展示内容，请稍后重试。"})
+                    return
 
-                    ht_match = re.search(r'"hashtags"\s*:\s*"([^"]+)"', full_content)
-                    if ht_match:
-                        hashtags = ht_match.group(1)
+            try:
+                import re
 
-                    question_match = re.search(
-                        r"<<<\s*Questions\s*:\s*([\s\S]*?)\s*>>>", full_content
-                    )
-                    if question_match:
-                        question_payload = question_match.group(1).strip()
-                        first_bracket = question_payload.find("[")
-                        last_bracket = question_payload.rfind("]")
-                        if first_bracket != -1 and last_bracket != -1:
-                            question_payload = question_payload[
-                                first_bracket : last_bracket + 1
-                            ]
+                ht_match = re.search(r'"hashtags"\s*:\s*"([^"]+)"', full_content)
+                if ht_match:
+                    hashtags = ht_match.group(1)
 
+                question_match = re.search(
+                    r"<<<\s*Questions\s*:\s*([\s\S]*?)\s*>>>", full_content
+                )
+                if question_match:
+                    question_payload = question_match.group(1).strip()
+                    first_bracket = question_payload.find("[")
+                    last_bracket = question_payload.rfind("]")
+                    if first_bracket != -1 and last_bracket != -1:
+                        question_payload = question_payload[
+                            first_bracket : last_bracket + 1
+                        ]
+
+                    # 添加 JSON 解析错误处理，避免服务器崩溃
+                    try:
                         parsed_questions = json.loads(question_payload)
                         if isinstance(parsed_questions, list):
                             questions = [
@@ -2431,41 +2729,46 @@ def handle_xiaohongshu_stream_post():
                                 for item in parsed_questions
                                 if str(item).strip()
                             ]
+                    except json.JSONDecodeError:
+                        # JSON 解析失败时使用空列表，后续会生成默认问题
+                        questions = []
 
-                        full_content = re.sub(
-                            r"\n*\s*<<<\s*Questions\s*:\s*[\s\S]*?\s*>>>",
-                            "",
-                            full_content,
-                        ).strip()
-                except Exception:
-                    pass
+                    full_content = re.sub(
+                        r"\n*\s*<<<\s*Questions\s*:\s*[\s\S]*?\s*>>>",
+                        "",
+                        full_content,
+                    ).strip()
+            except Exception:
+                pass
 
-                if not questions:
-                    dynamic_qs = generate_follow_up_questions(full_content)
-                    if dynamic_qs:
-                        try:
-                            parsed_questions = json.loads(dynamic_qs)
-                            if isinstance(parsed_questions, list):
-                                questions = [
-                                    str(item).strip()
-                                    for item in parsed_questions
-                                    if str(item).strip()
-                                ]
-                        except Exception:
-                            pass
+            if not questions:
+                dynamic_qs = generate_follow_up_questions(full_content)
+                if dynamic_qs:
+                    try:
+                        parsed_questions = json.loads(dynamic_qs)
+                        if isinstance(parsed_questions, list):
+                            questions = [
+                                str(item).strip()
+                                for item in parsed_questions
+                                if str(item).strip()
+                            ]
+                    except Exception:
+                        pass
 
-                if not questions:
-                    questions = [
-                        "精准转化哪类人群？",
-                        "核心卖点还有哪些？",
-                        "补充限时优惠信息？",
-                    ]
+            if not questions:
+                questions = [
+                    "想精准转化哪类人群？",
+                    "核心卖点还需要补充哪些细节？",
+                    "是否要补充优惠或限时信息？",
+                ]
 
-                yield f"data: {json.dumps({'done': True, 'hashtags': hashtags, 'questions': questions}, ensure_ascii=False)}\n\n"
+            yield emit_sse(
+                {"done": True, "hashtags": hashtags, "questions": questions}
+            )
 
         except Exception as e:
             print(f"Stream error: {e}")
-            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield emit_sse({"error": normalize_stream_error(e)})
 
     return Response(
         generate(),
@@ -2476,6 +2779,8 @@ def handle_xiaohongshu_stream_post():
             "Connection": "keep-alive",
         },
     )
+
+
 
 
 @app.route("/api/stream_generate", methods=["POST"])  # 新增专用流式端点
@@ -2555,6 +2860,8 @@ GENERATION_HISTORY = []
 
 @app.route("/api/generation_history")
 def get_history():
+    if not GENERATION_HISTORY:
+        return jsonify({"average_time": 0, "recent": []})
     return jsonify(
         {
             "average_time": sum(h["time"] for h in GENERATION_HISTORY)
@@ -2663,7 +2970,7 @@ def upload_image():
         return jsonify(
             {
                 "status": "success",
-                "image_url": f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/{temp_path}",
+                "image_url": storage_build_public_url(temp_path),
                 "temp_path": temp_path,
                 "filename": file.filename,
             }
@@ -2675,406 +2982,128 @@ def upload_image():
 
 @app.route("/api/get-data", methods=["post"])
 def api_get_data():
-    config_util.load_config()
-    send_voice_list = []
-
-    # 1. 总是加入本地 Azure/Edge 声音
-    try:
-        voice_list = tts_voice.get_voice_list()
-        for voice in voice_list:
-            voice_data = voice.value
-            send_voice_list.append(
-                {
-                    "id": voice_data.get("name", voice_data["voiceName"]),
-                    "name": voice_data["name"],
-                }
-            )
-    except Exception as e:
-        print(f"Azure voice list error: {e}")
-
-    # 2. 合并 Ali 声音
-    ali_voices = [
-        {"id": "abin", "name": "阿斌"},
-        {"id": "zhixiaobai", "name": "知小白"},
-        {"id": "zhixiaoxia", "name": "知小夏"},
-        {"id": "zhixiaomei", "name": "知小妹"},
-        {"id": "zhigui", "name": "知柜"},
-        {"id": "zhishuo", "name": "知硕"},
-        {"id": "aixia", "name": "艾夏"},
-        {"id": "zhifeng_emo", "name": "知锋_多情感"},
-        {"id": "zhibing_emo", "name": "知冰_多情感"},
-        {"id": "zhimiao_emo", "name": "知妙_多情感"},
-        {"id": "zhimi_emo", "name": "知米_多情感"},
-        {"id": "zhiyan_emo", "name": "知燕_多情感"},
-        {"id": "zhibei_emo", "name": "知贝_多情感"},
-        {"id": "zhitian_emo", "name": "知甜_多情感"},
-        {"id": "xiaoyun", "name": "小云"},
-        {"id": "xiaogang", "name": "小刚"},
-        {"id": "ruoxi", "name": "若兮"},
-        {"id": "siqi", "name": "思琪"},
-        {"id": "sijia", "name": "思佳"},
-        {"id": "sicheng", "name": "思诚"},
-        {"id": "aiqi", "name": "艾琪"},
-        {"id": "aijia", "name": "艾佳"},
-        {"id": "aicheng", "name": "艾诚"},
-        {"id": "aida", "name": "艾达"},
-        {"id": "ninger", "name": "宁儿"},
-        {"id": "ruilin", "name": "瑞琳"},
-        {"id": "siyue", "name": "思悦"},
-        {"id": "aiya", "name": "艾雅"},
-        {"id": "aimei", "name": "艾美"},
-        {"id": "aiyu", "name": "艾雨"},
-        {"id": "aiyue", "name": "艾悦"},
-        {"id": "aijing", "name": "艾婧"},
-        {"id": "xiaomei", "name": "小美"},
-        {"id": "aina", "name": "艾娜"},
-        {"id": "yina", "name": "伊娜"},
-        {"id": "sijing", "name": "思婧"},
-        {"id": "sitong", "name": "思彤"},
-        {"id": "xiaobei", "name": "小北"},
-        {"id": "aitong", "name": "艾彤"},
-        {"id": "aiwei", "name": "艾薇"},
-        {"id": "aibao", "name": "艾宝"},
-        {"id": "shanshan", "name": "姗姗"},
-        {"id": "chuangirl", "name": "小玥"},
-        {"id": "lydia", "name": "Lydia"},
-        {"id": "aishuo", "name": "艾硕"},
-        {"id": "qingqing", "name": "青青"},
-        {"id": "cuijie", "name": "翠姐"},
-        {"id": "xiaoze", "name": "小泽"},
-        {"id": "zhimao", "name": "知猫"},
-        {"id": "zhiyuan", "name": "知媛"},
-        {"id": "zhiya", "name": "知雅"},
-        {"id": "zhiyue", "name": "知悦"},
-        {"id": "zhida", "name": "知达"},
-        {"id": "zhistella", "name": "知莎"},
-        {"id": "kelly", "name": "Kelly"},
-        {"id": "jiajia", "name": "佳佳"},
-        {"id": "taozi", "name": "桃子"},
-        {"id": "guijie", "name": "柜姐"},
-        {"id": "stella", "name": "Stella"},
-        {"id": "stanley", "name": "Stanley"},
-        {"id": "kenny", "name": "Kenny"},
-        {"id": "rosa", "name": "Rosa"},
-        {"id": "mashu", "name": "马树"},
-        {"id": "xiaoxian", "name": "小仙"},
-        {"id": "yuer", "name": "悦儿"},
-        {"id": "maoxiaomei", "name": "猫小美"},
-        {"id": "aifei", "name": "艾飞"},
-        {"id": "yaqun", "name": "亚群"},
-        {"id": "qiaowei", "name": "巧薇"},
-        {"id": "dahu", "name": "大虎"},
-        {"id": "ailun", "name": "艾伦"},
-        {"id": "jielidou", "name": "杰力豆"},
-        {"id": "laotie", "name": "老铁"},
-        {"id": "laomei", "name": "老妹"},
-        {"id": "aikan", "name": "艾侃"},
-    ]
-    send_voice_list += ali_voices
-
-    # 3. 合并 Volcano 声音
-    try:
-        send_voice_list += volcano_tts.get_volcano_voices()
-    except Exception:
-        pass
-
-    # 4. 合并 Qwen 声音
-    try:
-        send_voice_list += qwen3.get_qwen_voices()
-    except Exception:
-        pass
-
-    # 5. 去重 (按 name)
-    seen = set()
-    unique_list = []
-    for v in send_voice_list:
-        nm = v.get("name")
-        if nm and nm not in seen:
-            seen.add(nm)
-            unique_list.append(v)
-
-    return json.dumps({"config": config_util.config, "voice_list": unique_list})
+    return jsonify(live_service.get_runtime_payload())
 
 
 @app.route("/api/submit", methods=["post"])
 def api_submit():
-    data = request.values.get("data")
-    config_data = json.loads(data) if data else request.get_json(force=True)
-    cfg = config_data.get("config", config_data)
-    config_util.save_config(cfg)
-    return '{"result":"successful"}'
+    return jsonify(live_service.save_runtime_payload(request))
 
 
 @app.route("/api/start-live", methods=["post"])
 def api_start_live():
-    try:
-        config_util.load_config()
-        web = wsa_server.new_web_instance(port=10003)
-        if not web.is_running():
-            web.start_server()
-        human = wsa_server.new_instance(port=10004)
-        if not human.is_running():
-            human.start_server()
-        if not fay_booter.is_running():
-            fay_booter.start()
-        wsa_server.get_web_instance().add_cmd({"liveState": 1})
-        return '{"result":"successful"}'
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify(live_service.start_live())
 
 
 @app.route("/api/stop-live", methods=["post"])
 def api_stop_live():
-    try:
-        if fay_booter.is_running():
-            fay_booter.stop()
-        web = wsa_server.get_web_instance()
-        if web and web.is_running():
-            web.add_cmd({"liveState": 0})
-        return '{"result":"successful"}'
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify(live_service.stop_live())
 
 
 @app.route("/api/get-msg", methods=["post"])
 def api_get_msg():
-    raw_data = request.form.get("data")
-    if not raw_data:
-        return jsonify({"list": []})
+    return jsonify(live_service.get_message_history(request))
 
-    try:
-        payload = json.loads(raw_data)
-    except Exception:
-        return jsonify({"list": []})
 
-    username = payload.get("username", "User")
-    uid = member_db.new_instance().find_user(username)
-    if uid == 0:
-        return jsonify({"list": []})
-
-    rows = content_db.new_instance().get_list("all", "desc", 1000, uid)
-    result = []
-    for row in reversed(rows):
-        result.append(
-            {
-                "type": row[0],
-                "way": row[1],
-                "content": row[2],
-                "createtime": row[3],
-                "timetext": row[4],
-                "username": row[5],
-            }
-        )
-    return jsonify({"list": result})
+@app.route("/api/get-member-list", methods=["post"])
+def api_get_member_list():
+    return jsonify(live_service.get_member_list())
 
 
 @app.route("/api/chat", methods=["post"])
 def api_chat():
-    try:
-        data = request.get_json(force=True)
-        text = data.get("text", "")
-        user = data.get("user", "User")
-
-        if not text:
-            return jsonify({"error": "Empty text"}), 400
-
-        if not fay_booter.is_running():
-            fay_booter.start()
-
-        # 异步处理交互，不等待返回，模拟 console 输入
-        interact = Interact("text", 1, {"user": user, "msg": text})
-
-        # 使用 MyThread 异步运行，避免阻塞 HTTP 请求太久
-        # 但为了让前端看到是否触发，我们这里还是调用一下，不过 on_interact 本身可能是同步的
-        # 为了不阻塞，我们还是放入线程池或者直接起个线程
-        # 注意：这里我们不需要返回值，因为输出是通过 WebSocket 推送给前端的
-
-        MyThread(target=fay_booter.feiFei.on_interact, args=[interact]).start()
-
-        return jsonify({"status": "success", "message": "Interaction started"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    incoming_request_id = request.headers.get("X-Request-Id", "")
+    trace_log(
+        module="aigc_server",
+        stage="api_chat",
+        status="received",
+        request_id=incoming_request_id,
+        text_len=len(str((request.get_json(silent=True) or {}).get("text", "") or "")),
+        text_preview=summarize_text((request.get_json(silent=True) or {}).get("text", "")),
+    )
+    payload, status = live_service.submit_chat(request.get_json(force=True), request_id=incoming_request_id)
+    trace_log(
+        module="aigc_server",
+        stage="api_chat",
+        status="ok" if status < 400 else "error",
+        request_id=payload.get("request_id", incoming_request_id),
+        error="" if status < 400 else summarize_text(payload.get("error")),
+        http_status=status,
+    )
+    return jsonify(payload), status
 
 
 @app.route("/api/asr", methods=["post"])
 def api_asr():
-    upload = request.files.get("file")
-    if upload is None or upload.filename == "":
-        return jsonify({"error": "Missing audio file"}), 400
-
-    asr_url = getattr(config_util, "qwen3_asr_url", "http://127.0.0.1:8001/asr")
-    safe_name = secure_filename(upload.filename) or "recording.webm"
-    
-    # 读取上传的音频数据
-    audio_data = upload.read()
-    
-    # 检查是否需要转换格式（WebM/OGG 等需要转换为 WAV）
-    needs_conversion = not safe_name.lower().endswith('.wav')
-    
-    if needs_conversion:
-        # 使用 pydub 将音频转换为 WAV 格式
-        try:
-            from pydub import AudioSegment
-            import io
-            
-            # 从上传的数据创建 AudioSegment
-            audio = AudioSegment.from_file(io.BytesIO(audio_data))
-            
-            # 转换为 16kHz 单声道 WAV
-            audio = audio.set_frame_rate(16000)
-            audio = audio.set_channels(1)
-            
-            # 导出为 WAV 格式
-            wav_buffer = io.BytesIO()
-            audio.export(wav_buffer, format="wav")
-            wav_buffer.seek(0)
-            
-            # 更新文件名和数据
-            safe_name = safe_name.rsplit('.', 1)[0] + '.wav' if '.' in safe_name else safe_name + '.wav'
-            audio_data = wav_buffer.read()
-            
-        except Exception as e:
-            print(f"Audio conversion error: {e}")
-            return jsonify({"error": f"Audio conversion failed: {e}"}), 400
-
-    try:
-        response = requests.post(
-            asr_url,
-            files={
-                "file": (
-                    safe_name,
-                    audio_data,
-                    "audio/wav",
-                )
-            },
-            timeout=180,
-        )
-    except requests.RequestException as exc:
-        return jsonify({"error": f"ASR service unavailable: {exc}"}), 502
-
-    try:
-        payload = response.json()
-    except ValueError:
-        payload = {"error": response.text or "Invalid ASR response"}
-
-    return jsonify(payload), response.status_code
+    incoming_request_id = request.headers.get("X-Request-Id", "")
+    trace_log(
+        module="aigc_server",
+        stage="api_asr",
+        status="received",
+        request_id=incoming_request_id,
+        filename=getattr(request.files.get("file"), "filename", ""),
+    )
+    payload, status = live_service.transcribe_audio(request.files.get("file"), request_id=incoming_request_id)
+    trace_log(
+        module="aigc_server",
+        stage="api_asr",
+        status="ok" if status < 400 else "error",
+        request_id=payload.get("request_id", incoming_request_id),
+        error="" if status < 400 else summarize_text(payload.get("error") or payload.get("detail")),
+        http_status=status,
+    )
+    return jsonify(payload), status
 
 
 @app.route("/audio/<path:filename>")
 def serve_audio(filename):
-    audio_dir = os.path.join(os.getcwd(), "samples")
-    audio_path = os.path.join(audio_dir, filename)
-    if not os.path.isfile(audio_path):
-        return jsonify({"error": "Audio file not found"}), 404
-    return send_file(audio_path)
+    result = live_service.serve_audio_file(filename)
+    # Handle tuple response (error case: jsonify, status_code)
+    if isinstance(result, tuple):
+        response = result[0]
+        status_code = result[1]
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        return response, status_code
+    # Handle single response object (success case: send_file)
+    response = result
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+    return response
 
 
 @app.route("/api/latest-audio")
 def api_latest_audio():
-    samples_dir = Path(os.getcwd()) / "samples"
     since = request.args.get("since", type=int)
-
-    if not samples_dir.exists():
-        return jsonify({"audio": None})
-
-    candidates = [path for path in samples_dir.glob("sample-*.wav") if path.is_file()]
-    if since is not None:
-        candidates = [
-            path
-            for path in candidates
-            if int(path.stat().st_mtime * 1000) >= since
-        ]
-
-    if not candidates:
-        return jsonify({"audio": None})
-
-    latest = max(candidates, key=lambda path: path.stat().st_mtime)
-    mtime_ms = int(latest.stat().st_mtime * 1000)
-    return jsonify(
-        {
-            "audio": {
-                "filename": latest.name,
-                "mtime_ms": mtime_ms,
-                "url": f"/audio/{latest.name}",
-            }
-        }
-    )
+    incoming_request_id = request.headers.get("X-Request-Id", "") or request.args.get("request_id", "")
+    payload = live_service.get_latest_audio(since, request_id=incoming_request_id)
+    _trace_latest_audio_api(payload, since, payload.get("request_id", incoming_request_id))
+    return jsonify(payload)
 
 
 @app.route("/api/ws-status")
 def ws_status():
-    ui = wsa_server.get_web_instance()
-    human = wsa_server.get_instance()
-    return jsonify(
-        {
-            "ui_server_running": ui is not None,
-            "human_server_running": human is not None,
-            "human_client_connected": (human.isConnect if human else False),
-        }
+    return jsonify(live_service.get_ws_status())
+
+
+@app.route("/api/health/live")
+def api_live_health():
+    payload = live_service.get_live_health()
+    trace_log(
+        module="aigc_server",
+        stage="api_live_health",
+        status=payload.get("overall_status", "unknown"),
+        request_id=request.headers.get("X-Request-Id", "") or "-",
     )
+    return jsonify(payload)
 
 
 @app.route("/v1/chat/completions", methods=["post"])
 @app.route("/api/send/v1/chat/completions", methods=["post"])
 def api_send_v1_chat_completions():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        data = {}
-
-    last_content = ""
-    username = "User"
-
-    messages = data.get("messages") or []
-    if isinstance(messages, list) and messages:
-        last_message = messages[-1] if isinstance(messages[-1], dict) else {}
-        username = last_message.get("role", "User")
-        if username == "user":
-            username = "User"
-        last_content = last_message.get("content", "")
-    else:
-        prompt = data.get("prompt")
-        if isinstance(prompt, str):
-            last_content = prompt
-
-    if not fay_booter.is_running() or getattr(fay_booter, "feiFei", None) is None:
-        try:
-            fay_booter.start()
-        except Exception as e:
-            return jsonify({"error": f"core not running: {e}"}), 500
-
-    try:
-        interact = Interact("text", 1, {"user": username, "msg": last_content})
-        resp = fay_booter.feiFei.on_interact(interact)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    if resp is None:
-        resp_text = ""
-    elif isinstance(resp, str):
-        resp_text = resp
-    else:
-        resp_text = str(resp)
-
-    return jsonify(
-        {
-            "id": "chatcmpl-local",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": data.get("model", "fay"),
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": resp_text},
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {
-                "prompt_tokens": len(last_content or ""),
-                "completion_tokens": len(resp_text),
-                "total_tokens": len(last_content or "") + len(resp_text),
-            },
-        }
-    )
+    return jsonify(live_service.create_chat_completion(request.get_json(silent=True)))
 
 
 # 获取单个商品详情
@@ -3112,17 +3141,15 @@ def get_product_detail(product_id):
         bucket = _create_oss_bucket()
 
         info_path = f"products/{product_id}/info.json"
-        if not bucket.object_exists(info_path):
+        if not storage_object_exists(bucket, info_path):
             return jsonify({"status": "error", "error": "商品不存在"}), 404
 
-        info = bucket.get_object(info_path).read()
-        product = json.loads(info)
+        product = read_json_object(bucket, info_path, default={}) or {}
 
-        # 获取所有图片
-        product["images"] = [
-            f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/{obj.key}"
-            for obj in oss2.ObjectIterator(bucket, prefix=f"products/{product_id}/")
-            if obj.key.endswith((".jpg", ".png", ".gif", ".webp"))
+        product["images"] = _normalize_edit_image_urls(bucket, product_id, product)
+        product["generated_images"] = [
+            _build_oss_public_url(key)
+            for key in _get_generated_image_keys(bucket, product_id)
         ]
 
         return jsonify({"status": "success", "product": product})
@@ -3155,14 +3182,14 @@ def get_marketing_materials(product_name):
         }
 
         # 读取营销文案
-        copy_path = f"products/{product_id}/marketing/copywriting.txt"
+        copy_path = f"products/{product_id}/generated_content/marketing.txt"
         if bucket.object_exists(copy_path):
             marketing_data["copywriting"] = (
                 bucket.get_object(copy_path).read().decode("utf-8")
             )
 
         # 获取营销图片
-        images_path = f"products/{product_id}/marketing/images/"
+        images_path = f"products/{product_id}/generated_content/images/"
         for img in oss2.ObjectIterator(bucket, prefix=images_path):
             if not img.key.endswith("/"):
                 marketing_data["images"].append(
@@ -3170,7 +3197,7 @@ def get_marketing_materials(product_name):
                 )
 
         # 获取营销视频
-        videos_path = f"products/{product_id}/marketing/videos/"
+        videos_path = f"products/{product_id}/generated_content/videos/"
         for video in oss2.ObjectIterator(bucket, prefix=videos_path):
             if not video.key.endswith("/"):
                 marketing_data["videos"].append(
@@ -3219,7 +3246,7 @@ def get_all_marketing_products():
 
                     # 读取营销文案
                     text_path = f"{prefix}{product_id}/generated_content/marketing.txt"
-                    if bucket.object_exists(text_path):
+                    if storage_object_exists_quiet(bucket, text_path):
                         marketing_data["marketing_text"] = (
                             bucket.get_object(text_path).read().decode("utf-8")
                         )
@@ -3287,7 +3314,7 @@ def get_oss_products():
         if category:
             index_path = f"products/_index/by_category/{category}.json"
             if bucket.object_exists(index_path):
-                index_data = json.loads(bucket.get_object(index_path).read())
+                index_data = _migrate_category_index(bucket, category)
                 for item in index_data:
                     info_path = f"products/{item['product_id']}/info.json"
                     if bucket.object_exists(info_path):
@@ -3301,12 +3328,12 @@ def get_oss_products():
                                     "id": item["product_id"],
                                     "name": info.get("name", "未命名商品"),
                                     "images": info.get("images", []),
-                                    "main_image": item.get("main_image")
-                                    or (
-                                        info["images"][0]
-                                        if info.get("images")
-                                        else None
-                                    ),
+                                    "main_image": _build_oss_public_url(
+                                        item.get("main_image")
+                                    )
+                                    if item.get("main_image")
+                                    else None,
+                                    "main_image_key": item.get("main_image"),
                                 }
                             )
 
@@ -3323,6 +3350,7 @@ def get_oss_products():
 
                     if bucket.object_exists(info_path):
                         info = json.loads(bucket.get_object(info_path).read())
+                        main_image_key = _resolve_main_image_key(bucket, product_id, info)
                         # 检查是否有图片的条件
                         if not has_images or (
                             info.get("images") and len(info["images"]) > 0
@@ -3332,9 +3360,12 @@ def get_oss_products():
                                     "id": product_id,
                                     "name": info.get("name", "未命名商品"),
                                     "images": info.get("images", []),
-                                    "main_image": info["images"][0]
-                                    if info.get("images")
+                                    "main_image": _build_oss_public_url(
+                                        main_image_key
+                                    )
+                                    if main_image_key
                                     else None,
+                                    "main_image_key": main_image_key,
                                 }
                             )
 
@@ -3374,22 +3405,13 @@ def save_generated_content():
         if file_ext not in valid_exts:
             file_ext = "png" if content_type == "image" else "mp4"  # 使用默认扩展名
 
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        random_str = uuid.uuid4().hex[:6]
-
         # 使用自定义路径或默认路径
         if custom_path:
-            save_path = f"{custom_path}gen_{timestamp}_{random_str}.{file_ext}"
-            # 确保目录存在
             dir_path = custom_path if custom_path.endswith("/") else f"{custom_path}/"
-            if not bucket.object_exists(dir_path):
-                bucket.put_object(dir_path, "")
+            save_path = f"{dir_path}gen_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}.{file_ext}"
+            storage_ensure_prefix(bucket, dir_path)
         else:
-            if content_type == "image":
-                save_path = f"products/{product_id}/generated_content/images/gen_{timestamp}_{random_str}.{file_ext}"
-            else:
-                save_path = f"products/{product_id}/generated_content/videos/gen_{timestamp}_{random_str}.{file_ext}"
-            # 确保目录存在
+            save_path = generated_asset_key(product_id, content_type, file_ext)
             ensure_oss_directories(bucket, product_id)
 
         # 下载文件并上传到OSS
@@ -3403,7 +3425,7 @@ def save_generated_content():
             print(f"[OSS上传] 文件下载完成，大小: {len(file_content)} bytes")
 
             # 上传到OSS
-            result = bucket.put_object(save_path, file_content)
+            result = storage_put_object(bucket, save_path, file_content)
             print(f"[OSS上传] OSS返回状态: {result.status}")
 
             if result.status != 200:
@@ -3412,7 +3434,7 @@ def save_generated_content():
                 return jsonify({"status": "error", "error": error_msg}), 500
 
             # 返回OSS访问URL
-            oss_url = f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/{save_path}"
+            oss_url = storage_build_public_url(save_path)
             print(f"[OSS上传] 上传成功: {oss_url}")
 
             if content_type == "video" and task_id:
@@ -3443,17 +3465,8 @@ def save_generated_content():
 
 def ensure_oss_directories(bucket, product_id):
     """确保OSS目录结构存在"""
-    required_dirs = [
-        f"products/{product_id}/",
-        f"products/{product_id}/generated_content/",
-        f"products/{product_id}/generated_content/images/",
-        f"products/{product_id}/generated_content/videos/",
-    ]
-
-    for dir_path in required_dirs:
-        # OSS通过创建空对象来模拟目录
-        if not bucket.object_exists(dir_path):
-            bucket.put_object(dir_path, "")
+    for dir_path in generated_content_prefixes(product_id):
+        storage_ensure_prefix(bucket, dir_path)
 
 
 @app.route("/api/oss/categories")
@@ -3464,16 +3477,23 @@ def get_oss_categories():
             return jsonify({"status": "error", "error": "未配置OSS密钥"}), 500
 
         local_bucket = _create_oss_bucket()
+        info_cache = {}
 
         prefix = "products/_index/by_category/"
         files = local_bucket.list_objects(prefix=prefix).object_list
 
-        # 提取分类名称（去掉.json后缀）
-        categories = [
-            os.path.splitext(os.path.basename(f.key))[0]
-            for f in files
-            if f.key.endswith(".json")
-        ]
+        # 只返回迁移后仍有有效商品的分类，顺手清理历史脏索引
+        categories = []
+        for f in files:
+            if not f.key.endswith(".json"):
+                continue
+
+            category = os.path.splitext(os.path.basename(f.key))[0]
+            if not category:
+                continue
+
+            if _migrate_category_index(local_bucket, category, info_cache):
+                categories.append(category)
 
         return jsonify({"status": "success", "data": categories})
 
@@ -3491,12 +3511,13 @@ def get_oss_products_by_category():
     try:
         # 双重解码URL编码
         # local_bucket: 局部作用域的OSS桶对象，用于当前请求的OSS操作
-        local_bucket = _create_oss_bucket()
+        local_bucket = get_storage_bucket()
+        info_cache = {}
         decoded_category = unquote(unquote(category))
-        oss_path = f"products/_index/by_category/{decoded_category}.json"
+        oss_path = category_index_key(decoded_category)
 
         # 验证文件存在性
-        if not local_bucket.object_exists(oss_path):
+        if not storage_object_exists(local_bucket, oss_path):
             return jsonify(
                 {
                     "status": "success",
@@ -3505,15 +3526,20 @@ def get_oss_products_by_category():
                 }
             )
 
-        # 读取OSS文件内容
-        obj = local_bucket.get_object(oss_path)
-        products = json.loads(obj.read().decode("utf-8"))
+        # 读取并迁移分类索引
+        products = _migrate_category_index(local_bucket, decoded_category, info_cache)
 
-        # 验证数据格式
-        if not isinstance(products, list):
-            raise ValueError("商品数据格式错误，应为数组")
+        response_products = []
+        for item in products:
+            main_image_key = item.get("main_image")
+            response_item = dict(item)
+            response_item["main_image_key"] = main_image_key
+            response_item["main_image"] = (
+                _build_oss_public_url(main_image_key) if main_image_key else None
+            )
+            response_products.append(response_item)
 
-        return jsonify({"status": "success", "data": products})
+        return jsonify({"status": "success", "data": response_products})
 
     except Exception as e:
         return jsonify(
@@ -3531,3 +3557,6 @@ def get_oss_products_by_category():
 
 if __name__ == "__main__":
     run()
+
+
+
