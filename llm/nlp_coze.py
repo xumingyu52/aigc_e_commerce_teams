@@ -22,7 +22,7 @@ def question(cont, uid=0):
                 answer_info["type"] = "query"
                 answer_info["content"] = communication_history[i][2]
                 answer_info["content_type"] = "text"
-            elif communication_history[i][0] == "fay":
+            elif communication_history[i][0] in ("avatar", "assistant", "fay"):
                 answer_info["role"] = "assistant"
                 answer_info["type"] = "answer"
                 answer_info["content"] = communication_history[i][2]
@@ -47,29 +47,31 @@ def question(cont, uid=0):
         'Authorization': f"Bearer {cfg.coze_api_key}",
         'Content-Type': 'application/json'
     }
+    try:
+        response = requests.post(url, headers=headers, data=payload, stream=True)
 
-    response = requests.post(url, headers=headers, data=payload, stream=True)
-
-    if response.status_code == 200:
-        response_text = ""
-        start = False
-        for line in response.iter_lines():
-            if line:
-                line = line.decode('utf-8')  
-                if line == "event:conversation.message.completed":
-                    start = True
-                if line == "event:done":
-                    return response_text 
-                if start and line.startswith('data:'):
-                    json_str = line[5:]  
-                    try:
-                        event_data = json.loads(json_str)
-                        if event_data.get('type') == 'answer':
-                            response_text = event_data.get('content', '')
-                    except json.JSONDecodeError as e:
-                        print(f"JSON decode error: {e}")
-                        continue
-    else:
-        print(f"调用失败，状态码：{response.status_code}")
-        return "抱歉，我现在太忙了，休息一会，请稍后再试。"
-
+        if response.status_code == 200:
+            response_text = ""
+            start = False
+            for line in response.iter_lines():
+                if line:
+                    line = line.decode('utf-8')  
+                    if line == "event:conversation.message.completed":
+                        start = True
+                    if line == "event:done":
+                        return response_text 
+                    if start and line.startswith('data:'):
+                        json_str = line[5:]  
+                        try:
+                            event_data = json.loads(json_str)
+                            if event_data.get('type') == 'answer':
+                                response_text = event_data.get('content', '')
+                        except json.JSONDecodeError as e:
+                            print(f"JSON decode error: {e}")
+                            continue
+        else:
+            print(f"调用失败，状态码：{response.status_code}")
+            return f"Coze调用拒绝 (HTTP {response.status_code})，请检查配置和鉴权。"
+    except requests.exceptions.RequestException as e:
+        print(f"请求失败: {e}")
+        return f"Coze连接失败。错误: {str(e)[:150]}"

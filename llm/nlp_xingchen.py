@@ -29,7 +29,7 @@ def question(cont, uid=0):
             if communication_history[i][0] == "member":
                 answer_info["role"] = "user"
                 answer_info["content"] = communication_history[i][2]
-            elif communication_history[i][0] == "fay":
+            elif communication_history[i][0] in ("avatar", "assistant", "fay"):
                 answer_info["role"] = "assistant"
                 answer_info["content"] = communication_history[i][2]
             message.append(answer_info)
@@ -53,7 +53,7 @@ def question(cont, uid=0):
                     "basicInfo": ""
                 },
                 "scenario": {
-                    "description": "你是数字人Fay。用户问你问题的时候回答之前请一步一步想清楚。你的底层AI算法技术是Fay。"
+                    "description": "你是一个 Live2D 数字人助手。用户问你问题的时候回答之前请一步一步想清楚，并给出自然、准确、易懂的回答。"
                 },
                 "context": {
                     "useChatHistory": False,
@@ -75,15 +75,15 @@ def question(cont, uid=0):
                 return content
             else:
                 util.log(1, "通义星辰调用失败，请检查配置")
-                response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+                response_text = "抱歉，星尘模型调用失败，请稍后再试。"
                 return response_text
         else:
             util.log(1, f"通义星辰调用失败，请检查配置（错误码：{response.status_code}）")
-            response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+            response_text = "抱歉，星尘模型调用失败，请稍后再试。"
             return response_text
-    except Exception as e:
-        util.log(1, f"通义星辰调用失败，请检查配置（错误：{e}）")
-        response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+    except requests.exceptions.RequestException as e:
+        print(f"请求失败: {e}")
+        response_text = f"星尘模型连接失败。错误: {str(e)[:150]}"
         return response_text
 
 # # 调用函数测试

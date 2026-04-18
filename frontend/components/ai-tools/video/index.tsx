@@ -20,6 +20,17 @@ import {
   toast,
 } from "@heroui/react"
 import { FolderTree, Package2, Sparkles } from "lucide-react"
+import {
+  fetchOssCategories,
+  fetchOssProductsByCategory,
+  saveGeneratedContent,
+} from "@/lib/oss/api"
+import {
+  buildOssAssetUrl,
+  fetchRuntimeOssDomain,
+  isAbsoluteUrl,
+  resolveOssCustomDomain,
+} from "@/lib/oss/shared"
 import { fetchFallbackCategories, fetchFallbackProductsByCategory } from "@/lib/products/oss-fallback"
 
 import { GenerationProgress } from "@/components/ai-tools/common/generation-progress"
@@ -27,11 +38,8 @@ import { GenerationProgress } from "@/components/ai-tools/common/generation-prog
 import { VideoGenerationArea } from "./video-generation-area"
 import { VideoGenerationHistory } from "./video-generation-history"
 import type {
-  CategoriesResponse,
   GenerateVideoResponse,
   Product,
-  ProductsResponse,
-  RuntimeImageConfigResponse,
   SaveGeneratedContentResponse,
   TaskHistoryResponse,
   TaskStatusResponse,
@@ -43,30 +51,6 @@ const HISTORY_REFRESH_MS = 5000
 const POLL_INTERVAL_MS = 2000
 const ELAPSED_TIME_INTERVAL_MS = 1000
 const PROGRESS_SIMULATION_INTERVAL_MS = 400
-const ENV_OSS_DOMAIN = process.env.NEXT_PUBLIC_ALIYUN_OSS_CUSTOM_DOMAIN ?? ""
-
-function isAbsoluteUrl(rawUrl: string | undefined): boolean {
-  return Boolean(rawUrl && /^https?:\/\//i.test(rawUrl))
-}
-
-function buildImageUrl(
-  rawUrl: string | undefined,
-  ossCustomDomain?: string | null
-): string | null {
-  if (!rawUrl) {
-    return null
-  }
-
-  if (isAbsoluteUrl(rawUrl)) {
-    return rawUrl
-  }
-
-  if (ossCustomDomain) {
-    return `https://${ossCustomDomain}/${rawUrl.replace(/^\/+/, "")}`
-  }
-
-  return null
-}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
@@ -184,11 +168,11 @@ export default function VideoGenerator() {
   )
 
   const resolvedOssCustomDomain = useMemo(() => {
-    return runtimeOssDomain || ENV_OSS_DOMAIN || null
+    return resolveOssCustomDomain(runtimeOssDomain)
   }, [runtimeOssDomain])
 
   const selectedProductImageUrl = useMemo(
-    () => buildImageUrl(selectedProduct?.main_image, resolvedOssCustomDomain),
+    () => buildOssAssetUrl(selectedProduct?.main_image, resolvedOssCustomDomain),
     [resolvedOssCustomDomain, selectedProduct]
   )
 
@@ -306,14 +290,14 @@ export default function VideoGenerator() {
       setIsLoadingRuntimeConfig(true)
 
       try {
-        const response = await fetch("/api/runtime-config/image", { signal })
-        const payload = await readJson<RuntimeImageConfigResponse>(
-          response,
-          "获取图片配置失败"
-        )
+        startTransition(() => {
+          setRuntimeOssDomain(null)
+        })
+
+        const domain = await fetchRuntimeOssDomain(signal)
 
         startTransition(() => {
-          setRuntimeOssDomain(payload.data?.oss_custom_domain?.trim() || null)
+          setRuntimeOssDomain(domain)
           setRuntimeConfigError(null)
         })
       } catch (error) {
@@ -362,18 +346,10 @@ export default function VideoGenerator() {
       setIsLoadingCategories(true)
 
       try {
-        const response = await fetch("/api/oss/categories", { signal })
-        const payload = await readJson<CategoriesResponse>(
-          response,
-          "获取分类失败"
-        )
-
-        if (payload.status !== "success" && payload.code !== 200) {
-          throw new Error(payload.error ?? payload.message ?? "获取分类失败")
-        }
+        const categories = await fetchOssCategories(signal)
 
         startTransition(() => {
-          setCategories(payload.data ?? [])
+          setCategories(categories)
         })
       } catch (error) {
         if (isAbortError(error)) {
@@ -404,22 +380,10 @@ export default function VideoGenerator() {
       setIsLoadingProducts(true)
 
       try {
-        const params = new URLSearchParams({ category })
-        const response = await fetch(
-          `/api/oss/products_by_category?${params.toString()}`,
-          { signal }
-        )
-        const payload = await readJson<ProductsResponse>(
-          response,
-          "获取商品失败"
-        )
-
-        if (payload.status !== "success") {
-          throw new Error(payload.error ?? payload.message ?? "获取商品失败")
-        }
+        const products = await fetchOssProductsByCategory(category, signal)
 
         startTransition(() => {
-          setProducts(payload.data ?? [])
+          setProducts(products)
         })
       } catch (error) {
         if (isAbortError(error)) {
@@ -736,22 +700,14 @@ export default function VideoGenerator() {
       setSavingTaskId(task.id)
 
       try {
-        const response = await fetch("/api/save_generated_content", {
-          body: JSON.stringify({
+        const payload = (await saveGeneratedContent(
+          {
             file_url: rawVideoUrl,
             product_id: productId,
             task_id: task.id,
             type: "video",
-          }),
-          headers: {
-            "Content-Type": "application/json",
-          },
-          method: "POST",
-        })
-        const payload = await readJson<SaveGeneratedContentResponse>(
-          response,
-          "保存视频到素材库失败"
-        )
+          }
+        )) as SaveGeneratedContentResponse
 
         if (payload.status !== "success") {
           throw new Error(payload.error ?? "保存视频到素材库失败")
@@ -789,13 +745,13 @@ export default function VideoGenerator() {
   return (
     <>
       <Toast.Provider placement="bottom end" />
-      <Card className="w-full rounded-2xl border-0 bg-[#EFEFEF] shadow-[0_4px_12px_rgba(0,0,0,0.04)]">
-        <Card.Header className="border-b border-gray-200 px-6 py-2.5">
+      <Card className="w-full rounded-2xl border-0 bg-[#EFEFEF] shadow-[0_4px_12px_rgba(0,0,0,0.04)] dark:bg-slate-900/85 dark:shadow-[0_4px_12px_rgba(0,0,0,0.35)]">
+        <Card.Header className="border-b border-gray-200 px-6 py-2.5 dark:border-slate-700">
           <div>
-            <Card.Title className="text-lg font-semibold text-gray-800">
+            <Card.Title className="text-lg font-semibold text-gray-800 dark:text-slate-100">
               短视频智造
             </Card.Title>
-            <Card.Description className="mt-1 text-sm text-gray-500">
+            <Card.Description className="mt-1 text-sm text-gray-500 dark:text-slate-400">
               AI 驱动的商品短视频生成工具
             </Card.Description>
           </div>
@@ -814,9 +770,9 @@ export default function VideoGenerator() {
           </div>
 
           <div className="space-y-6">
-            <Card className="rounded-xl border-0 bg-[#F8F8F8] shadow-none">
-              <Card.Header className="border-b border-gray-200 px-5 py-4">
-                <Card.Title className="text-base font-semibold text-gray-800">
+            <Card className="rounded-xl border-0 bg-[#F8F8F8] shadow-none dark:bg-slate-900/90 dark:ring-1 dark:ring-white/10">
+              <Card.Header className="border-b border-gray-200 px-5 py-4 dark:border-slate-700">
+                <Card.Title className="text-base font-semibold text-gray-800 dark:text-slate-100">
                   视频生成设置与描述
                 </Card.Title>
               </Card.Header>
@@ -824,11 +780,11 @@ export default function VideoGenerator() {
               <Card.Content className="space-y-4 p-5">
                 <div className="grid gap-6 xl:grid-cols-[6fr_4fr]">
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-gray-700">
+                    <Label className="text-sm font-medium text-gray-700 dark:text-slate-300">
                       描述文本
                     </Label>
                     <TextArea
-                      className="h-[200px] min-h-[200px] w-full resize-none rounded-xl border-0 bg-white px-4 py-3 text-sm text-gray-700 shadow-[inset_2px_2px_5px_rgba(203,213,225,0.6),inset_-2px_-2px_6px_rgba(255,255,255,0.9)] outline-none transition-shadow duration-200 focus:ring-2 focus:ring-[#91C1FA]/20"
+                      className="h-[200px] min-h-[200px] w-full resize-none rounded-xl border-0 bg-white px-4 py-3 text-sm text-gray-700 shadow-[inset_2px_2px_5px_rgba(203,213,225,0.6),inset_-2px_-2px_6px_rgba(255,255,255,0.9)] outline-none transition-shadow duration-200 focus:ring-2 focus:ring-[#91C1FA]/20 dark:bg-slate-800/90 dark:text-slate-200 dark:shadow-[inset_2px_2px_8px_rgba(0,0,0,0.35)]"
                       disabled={isGenerating}
                       placeholder="请输入视频描述内容，例如：镜头围绕商品缓慢推进，突出包装、质地和使用场景。"
                       rows={8}
@@ -838,10 +794,10 @@ export default function VideoGenerator() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-gray-700">
+                    <Label className="text-sm font-medium text-gray-700 dark:text-slate-300">
                       商品主图预览
                     </Label>
-                    <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white p-4 shadow-[inset_2px_2px_5px_rgba(203,213,225,0.6),inset_-2px_-2px_6px_rgba(255,255,255,0.9)]">
+                    <div className="flex min-h-[200px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white p-4 shadow-[inset_2px_2px_5px_rgba(203,213,225,0.6),inset_-2px_-2px_6px_rgba(255,255,255,0.9)] dark:border-slate-600 dark:bg-slate-800/80 dark:shadow-[inset_2px_2px_8px_rgba(0,0,0,0.35)]">
                       {selectedProductImageUrl ? (
                         <>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -852,7 +808,7 @@ export default function VideoGenerator() {
                           />
                         </>
                       ) : (
-                        <p className="text-center text-sm text-gray-400">
+                        <p className="text-center text-sm text-gray-400 dark:text-slate-500">
                           {previewDescription ?? "选择具体商品后，这里会显示主图预览。"}
                         </p>
                       )}
@@ -862,7 +818,7 @@ export default function VideoGenerator() {
 
                 <div className="grid gap-4 xl:grid-cols-[3fr_3fr_4fr]">
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-gray-700">
+                    <Label className="text-sm font-medium text-gray-700 dark:text-slate-300">
                       商品分类
                     </Label>
                     <Select
@@ -874,8 +830,8 @@ export default function VideoGenerator() {
                         handleCategoryChange(key ? key.toString() : "")
                       }
                     >
-                      <Select.Trigger className="h-11 w-full rounded-lg border-0 bg-[#F1F5F9] shadow-[inset_2px_2px_5px_rgba(203,213,225,0.6),inset_-2px_-2px_6px_rgba(255,255,255,0.9)]">
-                        <FolderTree className="h-4 w-4 text-gray-400" />
+                      <Select.Trigger className="h-11 w-full rounded-lg border-0 bg-[#F1F5F9] shadow-[inset_2px_2px_5px_rgba(203,213,225,0.6),inset_-2px_-2px_6px_rgba(255,255,255,0.9)] dark:bg-slate-800 dark:shadow-none">
+                        <FolderTree className="h-4 w-4 text-gray-400 dark:text-slate-500" />
                         <Select.Value />
                         {isLoadingCategories ? (
                           <Spinner color="accent" size="sm" />
@@ -883,11 +839,11 @@ export default function VideoGenerator() {
                           <Select.Indicator />
                         )}
                       </Select.Trigger>
-                      <Select.Popover className="rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
+                      <Select.Popover className="rounded-xl border border-gray-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
                         <ListBox className="max-h-60 overflow-auto py-1">
                           {categories.map((category) => (
                             <ListBox.Item
-                              className="cursor-pointer rounded-lg px-3 py-2.5 text-sm text-gray-700 hover:bg-[#91C1FA]/10 hover:text-[#91C1FA]"
+                              className="cursor-pointer rounded-lg px-3 py-2.5 text-sm text-gray-700 hover:bg-[#91C1FA]/10 hover:text-[#91C1FA] dark:text-slate-200 dark:hover:bg-sky-950/50"
                               id={category}
                               key={category}
                               textValue={category}
@@ -901,7 +857,7 @@ export default function VideoGenerator() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-gray-700">
+                    <Label className="text-sm font-medium text-gray-700 dark:text-slate-300">
                       商品选择
                     </Label>
                     <Select
@@ -922,8 +878,8 @@ export default function VideoGenerator() {
                         handleProductChange(value)
                       }}
                     >
-                      <Select.Trigger className="h-11 w-full rounded-lg border-0 bg-[#F1F5F9] shadow-[inset_2px_2px_5px_rgba(203,213,225,0.6),inset_-2px_-2px_6px_rgba(255,255,255,0.9)]">
-                        <Package2 className="h-4 w-4 text-gray-400" />
+                      <Select.Trigger className="h-11 w-full rounded-lg border-0 bg-[#F1F5F9] shadow-[inset_2px_2px_5px_rgba(203,213,225,0.6),inset_-2px_-2px_6px_rgba(255,255,255,0.9)] dark:bg-slate-800 dark:shadow-none">
+                        <Package2 className="h-4 w-4 text-gray-400 dark:text-slate-500" />
                         <Select.Value />
                         {isLoadingProducts ? (
                           <Spinner color="accent" size="sm" />
@@ -931,11 +887,11 @@ export default function VideoGenerator() {
                           <Select.Indicator />
                         )}
                       </Select.Trigger>
-                      <Select.Popover className="rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
+                      <Select.Popover className="rounded-xl border border-gray-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
                         <ListBox className="max-h-60 overflow-auto py-1">
                           {products.map((product) => (
                             <ListBox.Item
-                              className="cursor-pointer rounded-lg px-3 py-2.5 text-sm text-gray-700 hover:bg-[#91C1FA]/10 hover:text-[#91C1FA]"
+                              className="cursor-pointer rounded-lg px-3 py-2.5 text-sm text-gray-700 hover:bg-[#91C1FA]/10 hover:text-[#91C1FA] dark:text-slate-200 dark:hover:bg-sky-950/50"
                               id={product.product_id}
                               key={product.product_id}
                               textValue={product.name}
@@ -964,7 +920,7 @@ export default function VideoGenerator() {
                 </div>
 
                 {generateDisabledReason ? (
-                  <p className="rounded-xl bg-white px-4 py-3 text-sm text-gray-500 shadow-sm">
+                  <p className="rounded-xl bg-white px-4 py-3 text-sm text-gray-500 shadow-sm dark:bg-slate-800/80 dark:text-slate-400">
                     {isLoadingRuntimeConfig
                       ? "正在准备图片配置，稍后即可发起生成。"
                       : generateDisabledReason}

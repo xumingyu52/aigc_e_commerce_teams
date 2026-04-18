@@ -1,102 +1,15 @@
-#核心启动模块
-import time
-import re
-import pyaudio
-import socket
-import psutil
-import sys
-import requests
-from core.interact import Interact
-from core.recorder import Recorder
-from core import fay_core
-from scheduler.thread_manager import MyThread
-from utils import util, config_util, stream_util
-from core.wsa_server import MyServer
-from scheduler.thread_manager import MyThread
-from core import wsa_server
+import avatar_runtime
 
-feiFei: fay_core.FeiFei = None
-recorderListener: Recorder = None
-__running = False
-deviceSocketServer = None
-DeviceInputListenerDict = {}
-ngrok = None
+# 兼容旧版 Fay 启动接口。
+# 新代码应优先使用 avatar_runtime，这里只保留兼容导入。
 
-#启动状态
-def is_running():
-    return __running
-
-#录制麦克风音频输入并传给aliyun
-class RecorderListener(Recorder):
-
-    def __init__(self, device, fei):
-        self.__device = device
-        self.__RATE = 16000
-        self.__FORMAT = pyaudio.paInt16
-        self.__running = False
-        self.username = 'User'
-        self.channels = 1
-        self.sample_rate = 16000
-
-        super().__init__(fei)
-
-    def on_speaking(self, text):
-        if len(text) > 1:
-            interact = Interact("mic", 1, {'user': 'User', 'msg': text})
-            util.printInfo(3, "语音", '{}'.format(interact.data["msg"]), time.time())
-            feiFei.on_interact(interact)
-
-    def get_stream(self):
-        try:
-            self.paudio = pyaudio.PyAudio()
-            device_id = 0  # 或者根据需要选择其他设备
-
-            # 获取设备信息
-            device_info = self.paudio.get_device_info_by_index(device_id)
-            self.channels = device_info.get('maxInputChannels', 1) #很多麦克风只支持单声道录音
-            # self.sample_rate = int(device_info.get('defaultSampleRate', self.__RATE))
-            # 设置格式（这里以16位深度为例）
-            format = pyaudio.paInt16
-
-            # 打开音频流，使用设备的最大声道数和默认采样率
-            self.stream = self.paudio.open(
-                input_device_index=device_id,
-                rate=self.sample_rate,
-                format=format,
-                channels=self.channels,
-                input=True,
-                frames_per_buffer=4096
-            )
-
-            self.__running = True
-            MyThread(target=self.__pyaudio_clear).start()
-        except Exception as e:
-            util.log(1, f"[BOOTER] 麦克风初始化失败: {e}")
-            time.sleep(10)
-        return self.stream
+DeviceInputListenerDict = avatar_runtime.DeviceInputListenerDict
 
 
-    def __pyaudio_clear(self):
-        while self.__running:
-            time.sleep(30)
-    
-    def stop(self):
-        super().stop()
-        self.__running = False
-        try:
-            while self.is_reading:
-                time.sleep(0.1)
-            self.stream.stop_stream()
-            self.stream.close()
-            self.paudio.terminate()
-        except Exception as e:
-                util.log(1, f"[BOOTER] 录音设备停止失败: {e}")
-                util.log(1, "请检查设备是否有误，再重新启动!")
-
-    def is_remote(self):
-        return False
-                    
-        
+def __getattr__(name):
+    if name == "feiFei":
+        return avatar_runtime.get_instance()
+    raise AttributeError(name)
 
 
 #Edit by xszyou on 20230113:录制远程设备音频输入并传给aliyun
@@ -197,7 +110,7 @@ def accept_audio_device_output_connect():
     try:
         deviceSocketServer.bind(("0.0.0.0",10001))   
     except OSError as e:
-        if e.winerror == 10048:
+        if getattr(e, 'winerror', None) == 10048 or getattr(e, 'errno', None) in (98, 48):
             util.log(1, "端口 10001 已被占用，远程音频输入服务无法启动。")
             return
         else:
@@ -306,59 +219,16 @@ def stop():
 
 #开启服务
 def start():
-    global feiFei
-    global recorderListener
-    global __running
-    if __running and feiFei is not None:
-        util.log(1, "[BOOTER] 服务已在运行，跳过重复启动。")
-        return
-    util.log(1, '开启服务...')
-    __running = True
+    return avatar_runtime.start()
 
-    #读取配置
-    util.log(1, '读取配置...')
-    config_util.load_config()
 
-    #开启核心服务
-    util.log(1, '开启核心服务...')
-    feiFei = fay_core.FeiFei()
-    feiFei.start()
+def stop():
+    return avatar_runtime.stop()
 
-    #加载本地知识库
-    if config_util.key_chat_module == 'langchain':
-        from llm import nlp_langchain
-        nlp_langchain.save_all()
-    if config_util.key_chat_module == 'privategpt':    
-        from llm import nlp_privategpt
-        nlp_privategpt.save_all()
 
-    #开启录音服务
-    record = config_util.config['source']['record']
-    if record['enabled']:
-        util.log(1, '开启录音服务...')
-        recorderListener = RecorderListener(record['device'], feiFei)  # 监听麦克风
-        recorderListener.start()
+def restart():
+    return avatar_runtime.restart()
 
-    #启动声音沟通接口服务
-    util.log(1,'启动声音沟通接口服务...')
-    deviceSocketThread = MyThread(target=accept_audio_device_output_connect)
-    deviceSocketThread.start()
 
-    #启动自动播放服务
-    # util.log(1,'启动自动播放服务...')
-    # MyThread(target=start_auto_play_service).start()
-            
-    #监听控制台
-    util.log(1, '注册命令...')
-    MyThread(target=console_listener).start()  # 监听控制台
-
-    util.log(1, '服务启动完成!')
-    util.log(1, '使用 \'help\' 获取帮助.')
-
-    
-
-if __name__ == '__main__':
-    ws_server: MyServer = None
-    feiFei: fay_core.FeiFei = None
-    recorderListener: Recorder = None
-    start()
+def is_running():
+    return avatar_runtime.is_running()

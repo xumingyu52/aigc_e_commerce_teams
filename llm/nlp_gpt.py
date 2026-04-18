@@ -1,6 +1,5 @@
 """
-此代码由fay开源开发者社区 江湖墨明 提供
-通过此代码的修改，可以实现对接本地clash代理或远程代理，clash无需设置成系统代理。以解决在开系统代理后无法使用部分功能的问题
+此代码经过项目内适配，可对接本地 clash 代理或远程代理，避免开启系统代理后影响其他功能。
 """
 
 import requests
@@ -54,16 +53,17 @@ def question(cont, uid=0):
             if communication_history[i][0] == "member":
                 answer_info["role"] = "user"
                 answer_info["content"] = communication_history[i][2]
-            elif communication_history[i][0] == "fay":
+            elif communication_history[i][0] in ("avatar", "assistant", "fay"):
                 answer_info["role"] = "assistant"
                 answer_info["content"] = communication_history[i][2]
             message.append(answer_info)
             i -= 1
-    else:
-         answer_info = dict()
-         answer_info["role"] = "user"
-         answer_info["content"] = cont
-         message.append(answer_info)
+
+    if not message or message[-1].get("role") != "user" or message[-1].get("content") != cont:
+        answer_info = dict()
+        answer_info["role"] = "user"
+        answer_info["content"] = cont
+        message.append(answer_info)
 
     data = {
         "model":model_engine,
@@ -84,7 +84,7 @@ def question(cont, uid=0):
         response_text = result["choices"][0]["message"]["content"]
     except requests.exceptions.RequestException as e:
         print(f"请求失败: {e}")
-        response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+        response_text = f"GPT连接失败。错误: {str(e)[:150]}"
 
 
     util.log(1, "接口调用耗时 :" + str(time.time() - starttime))

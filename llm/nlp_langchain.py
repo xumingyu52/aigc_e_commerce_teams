@@ -37,6 +37,8 @@ def update_md5_list(file_name, md5_value):
             file.write(f"{name},{md5}\n")
 
 def load_all_pdfs(folder_path):
+    os.makedirs(folder_path, exist_ok=True)
+    os.makedirs(local_persist_path, exist_ok=True)
     md5_list = load_md5_list()
     for file_name in os.listdir(folder_path):
         if file_name.endswith(".pdf"):
@@ -167,8 +169,15 @@ def question(cont, uid=0):
 
         # 4. 执行检索回答
         index = load_index(index_name)    
-        llm = ChatOpenAI(model="gpt-3.5-turbo-16k")
-        ans = index.query(info, llm, chain_type="map_reduce")
+        llm = ChatOpenAI(model=cfg.gpt_model_engine)
+        try:
+            if hasattr(index.vectorstore, '_collection') and index.vectorstore._collection and index.vectorstore._collection.count() > 0:
+                ans = index.query(info, llm, chain_type="map_reduce")
+            else:
+                ans = llm.predict(info)
+        except Exception as e:
+            util.log(1, f"向量库检索异常，降级为直连大模型: {e}")
+            ans = llm.predict(info)
 
         # 5. 回复后处理：剥离并存储动态记忆
         if "[MEMORY:" in ans:
@@ -188,6 +197,8 @@ def question(cont, uid=0):
 
         return ans
     except Exception as e:
-        util.log(1, f"Fay 请求处理失败: {e}")
-        return "抱歉，我现在太忙了，休息一会，请稍后再试。"
+        import traceback
+        err_msg = traceback.format_exc()
+        util.log(1, f"Fay 请求处理失败: {err_msg}")
+        return f"模型报错，请检查配置或终端。错误概览: {str(e)[:150]}"
         

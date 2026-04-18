@@ -35,7 +35,7 @@ def question(cont, uid=0):
             if communication_history[i][0] == "member":
                 answer_info["role"] = "user"
                 answer_info["content"] = communication_history[i][2]
-            elif communication_history[i][0] == "fay":
+            elif communication_history[i][0] in ("avatar", "assistant", "fay"):
                 answer_info["role"] = "assistant"
                 answer_info["content"] = communication_history[i][2]
             message.append(answer_info)
@@ -64,7 +64,7 @@ def question(cont, uid=0):
         
     except requests.exceptions.RequestException as e:
         print(f"请求失败: {e}")
-        response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+        response_text = f"Ollama连接失败，请检查服务({cfg.ollama_ip}:11434)。错误: {str(e)[:150]}"
     util.log(1, "接口调用耗时 :" + str(time.time() - starttime))
     return response_text.strip()
 

@@ -14,68 +14,84 @@ const nextConfig = {
       },
       {
         source: "/api/:path*",
-        destination: "http://localhost:5000/api/:path*", // Flask backend
+        destination: "http://localhost:5003/api/:path*", // Flask backend
       },
       // 文案智造器 API 代理
       {
         source: "/generate_xiaohongshu",
-        destination: "http://localhost:5000/generate_xiaohongshu",
+        destination: "http://localhost:5003/generate_xiaohongshu",
       },
       {
         source: "/generate_xiaohongshu_stream",
-        destination: "http://localhost:5000/generate_xiaohongshu_stream",
+        destination: "http://localhost:5003/generate_xiaohongshu_stream",
       },
       {
         source: "/generate_xiaohongshu_stream_post",
-        destination: "http://localhost:5000/generate_xiaohongshu_stream_post",
+        destination: "http://localhost:5003/generate_xiaohongshu_stream_post",
       },
       {
         source: "/submit-form-data",
-        destination: "http://localhost:5000/submit-form-data",
+        destination: "http://localhost:5003/submit-form-data",
       },
       {
         source: "/api/product-info",
-        destination: "http://localhost:5000/api/product-info",
+        destination: "http://localhost:5003/api/product-info",
       },
       {
         source: "/api/saved-marketing-contents",
-        destination: "http://localhost:5000/api/saved-marketing-contents",
+        destination: "http://localhost:5003/api/saved-marketing-contents",
       },
       {
         source: "/api/saved-marketing-contents/:path*",
-        destination: "http://localhost:5000/api/saved-marketing-contents/:path*",
+        destination: "http://localhost:5003/api/saved-marketing-contents/:path*",
       },
       {
         source: "/api/products/library",
-        destination: "http://localhost:5000/get_products",
+        destination: "http://localhost:5003/get_products",
       },
       {
         source: "/api/products/library/:id",
-        destination: "http://localhost:5000/get_product_detail/:id",
+        destination: "http://localhost:5003/get_product_detail/:id",
       },
       {
         source: "/api/products/save",
-        destination: "http://localhost:5000/save_product",
+        destination: "http://localhost:5003/save_product",
       },
       {
         source: "/api/products/save/:id",
-        destination: "http://localhost:5000/save_product/:id",
+        destination: "http://localhost:5003/save_product/:id",
       },
       {
         source: "/api/products/delete/:id",
-        destination: "http://localhost:5000/delete_product/:id",
+        destination: "http://localhost:5003/delete_product/:id",
       },
       {
         source: "/api/products/upload-image",
-        destination: "http://localhost:5000/upload_image",
+        destination: "http://localhost:5003/upload_image",
       },
       {
         source: "/api/products/marketing-materials",
-        destination: "http://localhost:5000/get_all_marketing_products",
+        destination: "http://localhost:5003/get_all_marketing_products",
       },
       {
         source: "/api/products/marketing-materials/delete",
-        destination: "http://localhost:5000/api/delete_marketing_materials",
+        destination: "http://localhost:5003/api/delete_marketing_materials",
+      },
+      {
+        source: "/static/:path*",
+        destination: "http://localhost:5000/static/:path*",
+      },
+      {
+        source: "/api/:path*",
+        destination: "http://localhost:5000/api/:path*", // Flask backend
+      },
+      {
+        source: "/static/:path*",
+        destination: "http://localhost:5000/static/:path*",
+      },
+      {
+        source: "/api/:path*",
+        destination: "http://localhost:5000/api/:path*", // Flask backend
       },
     ];
   },
