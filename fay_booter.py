@@ -197,7 +197,7 @@ def accept_audio_device_output_connect():
     try:
         deviceSocketServer.bind(("0.0.0.0",10001))   
     except OSError as e:
-        if e.winerror == 10048:
+        if getattr(e, 'winerror', None) == 10048 or getattr(e, 'errno', None) in (98, 48):
             util.log(1, "端口 10001 已被占用，远程音频输入服务无法启动。")
             return
         else:

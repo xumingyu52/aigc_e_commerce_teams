@@ -179,7 +179,6 @@ class MyServer:
             return
         jsonStr = json.dumps(content)
         self.__listCmd.append(jsonStr)
-        # util.log('命令 {}'.format(content))
 
     # 开启服务
     def start_server(self):

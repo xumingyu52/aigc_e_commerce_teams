@@ -75,15 +75,15 @@ def question(cont, uid=0):
                 return content
             else:
                 util.log(1, "通义星辰调用失败，请检查配置")
-                response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+                response_text = "抱歉，星尘模型调用失败，请稍后再试。"
                 return response_text
         else:
             util.log(1, f"通义星辰调用失败，请检查配置（错误码：{response.status_code}）")
-            response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+            response_text = "抱歉，星尘模型调用失败，请稍后再试。"
             return response_text
-    except Exception as e:
-        util.log(1, f"通义星辰调用失败，请检查配置（错误：{e}）")
-        response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+    except requests.exceptions.RequestException as e:
+        print(f"请求失败: {e}")
+        response_text = f"星尘模型连接失败。错误: {str(e)[:150]}"
         return response_text
 
 # # 调用函数测试

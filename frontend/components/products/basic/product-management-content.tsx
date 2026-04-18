@@ -9,7 +9,7 @@ import ProductTable from "@/components/products/product-table"
 import { buildOssAssetUrl, fetchRuntimeOssDomain, resolveOssCustomDomain } from "@/lib/oss/shared"
 import type { Category, Product, ProductFormValue } from "@/lib/types/product"
 
-const API_BASE = "http://localhost:5000"
+const API_BASE = "http://localhost:5003"
 
 const EMPTY_FORM: ProductFormValue = {
   name: "",

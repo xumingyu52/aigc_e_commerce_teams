@@ -122,9 +122,9 @@ export default function LivePage() {
 
   const getApiBaseUrl = useEvent(() => {
     if (typeof window === 'undefined') {
-      return 'http://127.0.0.1:5000'
+      return 'http://127.0.0.1:5003'
     }
-    return `${window.location.protocol}//${window.location.hostname}:5000`
+    return `${window.location.protocol}//${window.location.hostname}:5003`
   })
 
   const getWsUrl = useEvent(() => {

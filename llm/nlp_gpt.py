@@ -84,7 +84,7 @@ def question(cont, uid=0):
         response_text = result["choices"][0]["message"]["content"]
     except requests.exceptions.RequestException as e:
         print(f"请求失败: {e}")
-        response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+        response_text = f"GPT连接失败。错误: {str(e)[:150]}"
 
 
     util.log(1, "接口调用耗时 :" + str(time.time() - starttime))

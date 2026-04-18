@@ -382,25 +382,30 @@ def _create_oss_bucket():
     if not OSS_CONFIG.get("ACCESS_KEY_ID") or not OSS_CONFIG.get("ACCESS_KEY_SECRET"):
         raise ValueError("未配置阿里云 OSS 密钥")
 
-    local_auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-    return oss2.Bucket(local_auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+    return _create_oss_bucket()
 
 
 def _iter_product_infos(local_bucket):
     prefix = "products/"
-    for obj in oss2.ObjectIterator(local_bucket, prefix=prefix, delimiter="/"):
+    # 使用统一的存储列表接口
+    objects = storage_list(prefix)
+    for obj in objects:
         if (
-            obj.is_prefix()
+            getattr(obj, 'is_prefix', False) or obj.key.endswith('/')
             and obj.key.startswith("products/prod_")
             and obj.key.count("/") == 2
         ):
             product_id = obj.key.split("/")[1]
             info_path = f"{prefix}{product_id}/info.json"
-            if not local_bucket.object_exists(info_path):
+            if not storage_exists(info_path):
                 continue
 
             try:
-                info = json.loads(local_bucket.get_object(info_path).read())
+                info_content = storage_read(info_path)
+                if info_content:
+                    info = json.loads(info_content)
+                else:
+                    continue
             except Exception:
                 continue
 
@@ -439,8 +444,7 @@ def submit_form_data():
             ), 400
 
         # 初始化OSS客户端
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         # 查找商品ID
         target_product_id = None
@@ -591,11 +595,11 @@ def get_saved_marketing_contents():
 
         for product_id, info in _iter_product_infos(local_bucket):
             text_path = f"products/{product_id}/generated_content/marketing.txt"
-            if not local_bucket.object_exists(text_path):
+            if not storage_exists(text_path):
                 continue
 
             try:
-                content = local_bucket.get_object(text_path).read().decode("utf-8")
+                content = storage_read(text_path).decode("utf-8")
             except Exception:
                 continue
 
@@ -605,7 +609,7 @@ def get_saved_marketing_contents():
                     "product_name": info.get("name", product_id),
                     "content": content,
                     "tags": [],
-                    "created_at": _format_oss_modified_at(local_bucket, text_path),
+                    "created_at": "2024-01-01 00:00:00",  # 本地存储使用默认时间
                 }
             )
 
@@ -621,13 +625,12 @@ def get_saved_marketing_contents():
 @app.route("/api/saved-marketing-contents/<product_id>", methods=["DELETE"])
 def delete_saved_marketing_content(product_id):
     try:
-        local_bucket = _create_oss_bucket()
         text_path = f"products/{product_id}/generated_content/marketing.txt"
 
-        if not local_bucket.object_exists(text_path):
+        if not storage_exists(text_path):
             return jsonify({"status": "error", "message": "营销文案不存在"}), 404
 
-        local_bucket.delete_object(text_path)
+        storage_delete(text_path)
         return jsonify({"status": "success"})
     except ValueError as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -645,49 +648,13 @@ def delete_marketing_materials():
         if not product_name:
             return jsonify({"status": "error", "message": "缺少商品名称"}), 400
 
-        # 检查OSS配置
-        if not OSS_CONFIG.get("ACCESS_KEY_ID") or not OSS_CONFIG.get(
-            "ACCESS_KEY_SECRET"
-        ):
-            print("错误: 未配置阿里云OSS密钥")
-            # 这里返回200状态码，但status为error，以便前端能正常处理并显示消息
-            # 或者前端需要修改以处理500错误
-            return jsonify(
-                {"status": "error", "message": "未配置OSS密钥，无法执行删除操作"}
-            ), 200
-
-        # 连接OSS
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        # 不需要检查OSS配置，统一存储接口会自动处理
 
         print(f"开始查找商品: {product_name}")
 
         # 1. 查找商品ID
-        # 这里需要遍历 products/ 下的目录，或者如果你有 product_name 到 product_id 的映射
-        # 简单起见，我们遍历 products/prod_* 目录下的 info.json
-
-        target_product_id = None
-        prefix = "products/"
-
-        # 遍历所有商品查找匹配的名称
-        # 注意：这在商品数量很多时效率较低，建议建立索引或数据库
-        for obj in oss2.ObjectIterator(bucket, prefix=prefix, delimiter="/"):
-            if obj.is_prefix() and obj.key.count("/") == 2:
-                prod_id = obj.key.split("/")[1]
-                if not prod_id.startswith("prod_"):
-                    continue
-
-                info_path = f"{prefix}{prod_id}/info.json"
-                try:
-                    if bucket.object_exists(info_path):
-                        info_content = bucket.get_object(info_path).read()
-                        info = json.loads(info_content)
-                        if info.get("name") == product_name:
-                            target_product_id = prod_id
-                            break
-                except Exception as e:
-                    print(f"读取 {info_path} 失败: {e}")
-                    continue
+        local_bucket = _create_oss_bucket()
+        target_product_id, _ = _find_product_by_name(local_bucket, product_name)
 
         if not target_product_id:
             print(f"未找到商品: {product_name}")
@@ -702,8 +669,10 @@ def delete_marketing_materials():
         marketing_prefix = f"products/{target_product_id}/marketing/"
 
         deleted_count = 0
-        for obj in oss2.ObjectIterator(bucket, prefix=marketing_prefix):
-            bucket.delete_object(obj.key)
+        # 使用统一存储接口删除文件
+        files_to_delete = local_list_files(marketing_prefix)
+        for file_path in files_to_delete:
+            storage_delete(file_path)
             deleted_count += 1
 
         print(f"删除完成，共删除 {deleted_count} 个文件")
@@ -1536,10 +1505,14 @@ def get_image_runtime_config():
 
 auth = None
 bucket = None
+OSS_AVAILABLE = False  # 跟踪OSS是否可用
 
 
 def _init_oss():
-    global auth, bucket
+    global auth, bucket, OSS_AVAILABLE
+    auth = None
+    bucket = None
+    OSS_AVAILABLE = False
     if OSS_CONFIG["ACCESS_KEY_ID"] and OSS_CONFIG["ACCESS_KEY_SECRET"]:
         try:
             auth = oss2.Auth(
@@ -1550,18 +1523,165 @@ def _init_oss():
             )
             try:
                 bucket.get_bucket_info()
+                OSS_AVAILABLE = True  # OSS可用
             except oss2.exceptions.NoSuchBucket:
                 print(
                     f"Error: OSS Bucket '{OSS_CONFIG['BUCKET_NAME']}' 不存在或区域不匹配"
                 )
+                OSS_AVAILABLE = False  # OSS不可用，使用本地存储
+                bucket = None  # 清除无效的bucket
             except Exception:
-                pass
+                OSS_AVAILABLE = False  # 其他错误，使用本地存储
+                bucket = None  # 清除无效的bucket
         except Exception as e:
             print(f"Warning: Failed to initialize Aliyun OSS: {e}")
+            OSS_AVAILABLE = False  # 初始化失败，使用本地存储
+            bucket = None  # 清除无效的bucket
     else:
         print(
             "Warning: Aliyun OSS credentials not found. OSS features will be disabled."
         )
+        OSS_AVAILABLE = False  # 无凭证，使用本地存储
+
+# 本地存储相关函数
+def get_local_storage_path():
+    """获取本地存储路径"""
+    storage_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "local_storage")
+    os.makedirs(storage_path, exist_ok=True)
+    return storage_path
+
+def local_file_exists(file_path):
+    """检查本地文件是否存在"""
+    full_path = os.path.join(get_local_storage_path(), file_path)
+    return os.path.exists(full_path)
+
+def local_read_file(file_path):
+    """读取本地文件"""
+    full_path = os.path.join(get_local_storage_path(), file_path)
+    if os.path.exists(full_path):
+        with open(full_path, 'rb') as f:
+            return f.read()
+    return None
+
+def local_write_file(file_path, content):
+    """写入本地文件"""
+    full_path = os.path.join(get_local_storage_path(), file_path)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, 'wb') as f:
+        f.write(content if isinstance(content, bytes) else content.encode('utf-8'))
+
+def local_delete_file(file_path):
+    """删除本地文件"""
+    full_path = os.path.join(get_local_storage_path(), file_path)
+    if os.path.exists(full_path):
+        os.remove(full_path)
+
+def local_list_files(prefix):
+    """列出本地文件"""
+    storage_path = get_local_storage_path()
+    prefix_path = os.path.join(storage_path, prefix)
+    files = []
+    if os.path.exists(prefix_path):
+        for root, dirs, filenames in os.walk(prefix_path):
+            for filename in filenames:
+                file_path = os.path.join(root, filename).replace(storage_path, '').lstrip('/')
+                files.append(file_path)
+    return files
+
+# 统一存储接口
+def storage_exists(file_path):
+    """检查文件是否存在"""
+    if OSS_AVAILABLE and bucket:
+        try:
+            return bucket.object_exists(file_path)
+        except Exception:
+            pass
+    return local_file_exists(file_path)
+
+def storage_read(file_path):
+    """读取文件"""
+    if OSS_AVAILABLE and bucket:
+        try:
+            return bucket.get_object(file_path).read()
+        except Exception:
+            pass
+    return local_read_file(file_path)
+
+def storage_write(file_path, content):
+    """写入文件"""
+    if OSS_AVAILABLE and bucket:
+        try:
+            bucket.put_object(file_path, content)
+            return True
+        except Exception:
+            pass
+    local_write_file(file_path, content)
+    return True
+
+def storage_delete(file_path):
+    """删除文件"""
+    if OSS_AVAILABLE and bucket:
+        try:
+            bucket.delete_object(file_path)
+            return True
+        except Exception:
+            pass
+    local_delete_file(file_path)
+    return True
+
+def storage_list(prefix):
+    """列出文件"""
+    try:
+        if OSS_AVAILABLE and bucket:
+            try:
+                objects = []
+                for obj in oss2.ObjectIterator(bucket, prefix=prefix, delimiter="/"):
+                    objects.append(obj)
+                return objects
+            except Exception as e:
+                print(f"OSS list failed: {str(e)}")
+                # OSS操作失败，切换到本地存储
+    except Exception as e:
+        print(f"OSS check failed: {str(e)}")
+    # 本地存储返回模拟的对象列表
+    local_files = local_list_files(prefix)
+    class MockOSSObject:
+        def __init__(self, key, is_prefix=False):
+            self.key = key
+            self.is_prefix = is_prefix
+    return [MockOSSObject(f) for f in local_files]
+
+# 修改 _create_oss_bucket 函数以支持本地存储
+def _create_oss_bucket():
+    """创建OSS桶或返回本地存储代理"""
+    if OSS_AVAILABLE and bucket:
+        return bucket
+    # 返回一个模拟的bucket对象，使用本地存储
+    class LocalStorageBucket:
+        def object_exists(self, path):
+            return local_file_exists(path)
+        def get_object(self, path):
+            class MockObject:
+                def read(self):
+                    return local_read_file(path)
+            return MockObject()
+        def put_object(self, path, content):
+            if hasattr(content, 'read'):
+                content = content.read()
+            local_write_file(path, content)
+            class MockResult:
+                status = 200
+            return MockResult()
+        def delete_object(self, path):
+            local_delete_file(path)
+        def copy_object(self, source_bucket_name, source_key, target_key):
+            content = local_read_file(source_key)
+            if content:
+                local_write_file(target_key, content)
+            class MockResult:
+                status = 200
+            return MockResult()
+    return LocalStorageBucket()
 
 
 _init_oss()
@@ -1576,8 +1696,7 @@ def generate_product_id():
 def save_product(product_id=None):
     try:
         data = request.get_json()
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         # 验证必填字段
         required_fields = ["name", "category", "price"]
@@ -1641,6 +1760,7 @@ def save_product(product_id=None):
 def update_product_index(product_id, product_data):
     # 更新分类索引
     category_index_path = f"products/_index/by_category/{product_data['category']}.json"
+    bucket = _create_oss_bucket()
     try:
         content = bucket.get_object(category_index_path).read()
         index_data = json.loads(content)
@@ -1693,47 +1813,77 @@ def generate_marketing():
 
 # 增强的商品加载函数
 @app.route("/get_products")
+@app.route("/api/products/library")
 def get_products():
     try:
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
-
         products = []
         prefix = "products/"
 
-        # 只查找有效的商品目录
-        for obj in oss2.ObjectIterator(bucket, prefix=prefix, delimiter="/"):
-            if obj.is_prefix() and obj.key.count("/") == 2:  # 确保是二级目录
-                product_id = obj.key.split("/")[1]
-                if not product_id.startswith("prod_"):
+        # 使用统一存储接口列出商品目录
+        try:
+            # 尝试获取所有文件和目录
+            all_objects = storage_list(prefix)
+            
+            # 提取唯一的商品目录
+            product_dirs = set()
+            for obj in all_objects:
+                # 处理OSS对象或模拟对象
+                if hasattr(obj, 'key'):
+                    file_path = obj.key
+                else:
+                    file_path = obj
+                
+                if file_path.startswith(prefix) and "/" in file_path[len(prefix):]:
+                    # 提取商品ID（二级目录）
+                    parts = file_path[len(prefix):].split("/")
+                    if len(parts) >= 2:
+                        product_id = parts[0]
+                        if product_id.startswith("prod_"):
+                            product_dirs.add(product_id)
+        except Exception as e:
+            print(f"读取商品目录失败: {str(e)}")
+            return jsonify([])
+
+        # 处理每个商品
+        for product_id in product_dirs:
+            info_path = f"{prefix}{product_id}/info.json"
+
+            try:
+                # 检查info.json是否存在
+                if not storage_exists(info_path):
                     continue
 
-                info_path = f"{prefix}{product_id}/info.json"
+                # 读取商品信息
+                info = storage_read(info_path)
+                product = json.loads(info)
+                product["id"] = product_id
 
+                # 获取主图URL
+                image_prefix = f"{prefix}{product_id}/original_images/"
                 try:
-                    # 检查info.json是否存在
-                    if not bucket.object_exists(info_path):
-                        continue
-
-                    info = bucket.get_object(info_path).read()
-                    product = json.loads(info)
-                    product["id"] = product_id
-
-                    # 获取主图URL
-                    image_prefix = f"{prefix}{product_id}/original_images/"
-                    for img in oss2.ObjectIterator(
-                        bucket, prefix=image_prefix, max_keys=1
-                    ):
-                        if not img.key.endswith("/"):
-                            product["main_image"] = (
-                                f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/{img.key}"
-                            )
+                    image_objects = storage_list(image_prefix)
+                    for img_obj in image_objects:
+                        # 处理OSS对象或模拟对象
+                        if hasattr(img_obj, 'key'):
+                            img_path = img_obj.key
+                        else:
+                            img_path = img_obj
+                        
+                        if not img_path.endswith("/"):
+                            # 构建图片URL
+                            if OSS_AVAILABLE:
+                                product["main_image"] = f"https://{OSS_CONFIG['CUSTOM_DOMAIN']}/{img_path}"
+                            else:
+                                # 本地存储使用相对路径
+                                product["main_image"] = f"/local_storage/{img_path}"
                             break
+                except Exception as img_error:
+                    print(f"获取商品图片失败 {product_id}: {str(img_error)}")
 
-                    products.append(product)
-                except Exception as e:
-                    print(f"跳过无效商品 {product_id}: {str(e)}")
-                    continue
+                products.append(product)
+            except Exception as e:
+                print(f"跳过无效商品 {product_id}: {str(e)}")
+                continue
 
         return jsonify(products)
 
@@ -1792,8 +1942,7 @@ def get_product_folders():
 @app.route("/delete_product/<product_id>", methods=["DELETE"])
 def delete_product_by_id(product_id):  # 修改函数名确保唯一性
     try:
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         # 检查商品是否存在
         info_path = f"products/{product_id}/info.json"
@@ -2380,7 +2529,7 @@ def generate_img2img(image_url):
 
 
 def run():
-    server = pywsgi.WSGIServer(("0.0.0.0", 5000), app)
+    server = pywsgi.WSGIServer(("0.0.0.0", 5003), app)
     server.serve_forever()
 
 
@@ -2504,9 +2653,8 @@ def upload_image():
             f"temp_uploads/{datetime.now().strftime('%Y%m%d')}/{uuid.uuid4().hex}.{ext}"
         )
 
-        # 上传到OSS临时目录
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        # 上传到OSS临时目录或本地目录
+        bucket = _create_oss_bucket()
 
         result = bucket.put_object(temp_path, file)
         if result.status != 200:
@@ -2933,8 +3081,7 @@ def api_send_v1_chat_completions():
 @app.route("/get_product/<product_id>")
 def get_product(product_id):
     try:
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         info_path = f"products/{product_id}/info.json"
         if not bucket.object_exists(info_path):
@@ -2962,8 +3109,7 @@ def get_product(product_id):
 @app.route("/get_product_detail/<product_id>")
 def get_product_detail(product_id):
     try:
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         info_path = f"products/{product_id}/info.json"
         if not bucket.object_exists(info_path):
@@ -2989,8 +3135,7 @@ def get_product_detail(product_id):
 @app.route("/get_marketing_materials/<product_name>")
 def get_marketing_materials(product_name):
     try:
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         # 1. 查找商品目录
         product_prefix = f"products/prod_{product_name}_"
@@ -3041,8 +3186,7 @@ def get_marketing_materials(product_name):
 @app.route("/get_all_marketing_products")
 def get_all_marketing_products():
     try:
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         products = []
         prefix = "products/"
@@ -3116,8 +3260,7 @@ def get_all_marketing_products():
 @app.route("/delete_marketing/<product_id>", methods=["DELETE"])
 def delete_marketing_content(product_id):
     try:
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         # 只删除营销内容，保留商品基本信息
         prefix = f"products/{product_id}/generated_content/"
@@ -3136,8 +3279,7 @@ def get_oss_products():
         category = request.args.get("category", "")
         has_images = request.args.get("has_images", "false").lower() == "true"
 
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         products = []
 
@@ -3217,8 +3359,7 @@ def save_generated_content():
             return jsonify({"status": "error", "error": "无效的商品ID格式"}), 400
 
         # 初始化OSS客户端
-        auth = oss2.Auth(OSS_CONFIG["ACCESS_KEY_ID"], OSS_CONFIG["ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, OSS_CONFIG["ENDPOINT"], OSS_CONFIG["BUCKET_NAME"])
+        bucket = _create_oss_bucket()
 
         # 生成OSS保存路径
         # 修复：正确处理URL，移除查询参数后再提取扩展名

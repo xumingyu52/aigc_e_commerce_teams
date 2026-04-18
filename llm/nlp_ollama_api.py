@@ -64,7 +64,7 @@ def question(cont, uid=0):
         
     except requests.exceptions.RequestException as e:
         print(f"请求失败: {e}")
-        response_text = "抱歉，我现在太忙了，休息一会，请稍后再试。"
+        response_text = f"Ollama连接失败，请检查服务({cfg.ollama_ip}:11434)。错误: {str(e)[:150]}"
     util.log(1, "接口调用耗时 :" + str(time.time() - starttime))
     return response_text.strip()
 

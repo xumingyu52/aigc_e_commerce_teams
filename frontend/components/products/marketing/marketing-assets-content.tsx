@@ -8,7 +8,7 @@ import MarketingTable from "@/components/products/marketing/marketing-table"
 import { buildOssAssetUrl, fetchRuntimeOssDomain, resolveOssCustomDomain } from "@/lib/oss/shared"
 import type { MarketingProduct } from "@/lib/types/marketing"
 
-const API_BASE = "http://localhost:5000"
+const API_BASE = "http://localhost:5003"
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError"
