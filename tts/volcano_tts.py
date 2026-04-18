@@ -5,7 +5,15 @@ import requests
 import time
 from utils import util, config_util
 from utils import config_util as cfg
+from utils.trace_utils import sanitize_request_token
 import wave
+
+
+def get_volcano_voices():
+    voice_type = getattr(cfg, "volcano_tts_voice_type", "")
+    if voice_type:
+        return [{"id": voice_type, "name": f"火山引擎-{voice_type}"}]
+    return []
 
 
 class Speech:
@@ -24,7 +32,7 @@ class Speech:
                 return data[3]
         return None    
 
-    def to_sample(self, text, style) :
+    def to_sample(self, text, style, request_id=None) :
         if cfg.volcano_tts_voice_type != None and cfg.volcano_tts_voice_type != '':
             voice = cfg.volcano_tts_voice_type
         else:
@@ -66,7 +74,8 @@ class Speech:
             response = requests.post(api_url, json.dumps(request_json), headers=header)
             if "data" in response.json():
                 data = response.json()["data"]
-                file_url = './samples/sample-' + str(int(time.time() * 1000)) + '.wav'
+                request_token = sanitize_request_token(request_id, fallback="sample")
+                file_url = f'./samples/sample-{request_token}-{int(time.time() * 1000)}.wav'
                 with wave.open(file_url, 'wb') as wf:
                         wf.setnchannels(1)
                         wf.setsampwidth(2)
